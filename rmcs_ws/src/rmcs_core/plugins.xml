@@ -45,6 +45,8 @@
   <class type="rmcs_core::controller::pid::FrictionWheelPidRecorder" base_class_type="rmcs_executor::Component" />
   <class type="rmcs_core::controller::motor_demo::JoystickVelocityMapping" base_class_type="rmcs_executor::Component" />
   <class type="rmcs_core::controller::motor_demo::VelocityFilter" base_class_type="rmcs_executor::Component" />
+  <class type="rmcs_core::controller::motor_demo::FixedTargetVelocity" base_class_type="rmcs_executor::Component" />
+  <class type="rmcs_core::controller::motor_demo::AngleTargetController" base_class_type="rmcs_executor::Component" />
 
   <class type="rmcs_core::controller::adrc::AdrcController" base_class_type="rmcs_executor::Component" />
 
