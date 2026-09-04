@@ -1,8 +1,9 @@
 # ============================================================================
 # 任务二 · 电机驱动演示启动配置
 # 启动：ros2 launch rmcs_bringup rmcs.launch.py robot:=test
-# 数据流（速度闭环）：
-#   摇杆左杆y → JoystickVelocityMapping → /motor_demo/target_velocity (目标速度)
+# 数据流（速度闭环 · 无遥控测试模式）：
+#   固定目标 setpoint=2.0 rad/s（不依赖遥控器）
+#     [有遥控器后：摇杆 → JoystickVelocityMapping → setpoint，见下方注释行]
 #   电机回报 → /motor_demo/motor/velocity → VelocityFilter → 滤波后(当PID反馈)
 #   PID: error=setpoint-measurement → /motor_demo/motor/control_torque → 电机
 # ============================================================================
@@ -13,22 +14,26 @@ rmcs_executor:
       # 硬件层：跟电机/遥控说话（test.cpp）
       - rmcs_core::hardware::MotorTest -> motor_test_hardware
 
-      # 软件层：摇杆→目标速度、测速低通滤波
-      - rmcs_core::controller::motor_demo::JoystickVelocityMapping -> motor_joystick_mapping
+      # 软件层：测速低通滤波
       - rmcs_core::controller::motor_demo::VelocityFilter -> motor_velocity_filter
+
+      # 【无遥控测试模式】摇杆映射暂时停用（DR16 遥控器到手后启用下面这行）
+      # - rmcs_core::controller::motor_demo::JoystickVelocityMapping -> motor_joystick_mapping
 
       # 闭环：复用现成 PID
       - rmcs_core::controller::pid::PidController -> motor_speed_pid_controller
+
+      # 观测接口：把内部 double 数据转发成真实 ROS2 话题（供 Foxglove / ros2 topic 使用）
+      - rmcs_core::broadcaster::ValueBroadcaster -> value_broadcaster
 
 motor_test_hardware:
   ros__parameters:
     # CBoard 的 USB 序列号（lsusb -v 看到的 iSerial），不是路径！
     board_serial: "D4-6A83-030D-F3D0-9103-F8A5-1246"
 
-motor_joystick_mapping:
-  ros__parameters:
-    # 保护：先限到低速验证（M3508 空载额定约 40+ rad/s，先给 5 起步）
-    max_velocity: 5.0
+# motor_joystick_mapping:   # （停用中，等遥控器再启用）
+#   ros__parameters:
+#     max_velocity: 5.0
 
 motor_velocity_filter:
   ros__parameters:
@@ -38,9 +43,9 @@ motor_velocity_filter:
 motor_speed_pid_controller:
   ros__parameters:
     measurement: /motor_demo/motor/velocity_filtered   # 反馈：滤波后测速(rad/s)
-    setpoint:    /motor_demo/target_velocity           # 目标：摇杆映射出的速度
+    setpoint: 2.0            # 【无遥控测试】固定目标速度 2 rad/s。SmartInput：填数字=常量；填字符串=话题
     control:     /motor_demo/motor/control_torque      # 输出：扭矩(N·m)给电机
-    kp: 0.02            # 先给安全小值，真机逐档加大（看会不会抖/响应慢）
+    kp: 0.15           # 无遥控测试：kp 给到能驱动 2 rad/s 的量级；若电机抖就把 kp 调小
     ki: 0.0
     kd: 0.0
     # 保护：扭矩限幅先收窄到 ±1 N·m（M3508 满幅≈6 N·m），调稳前别给大扭矩
@@ -48,3 +53,12 @@ motor_speed_pid_controller:
     output_max: 1.0
     integral_min: 0.0
     integral_max: 0.0
+
+value_broadcaster:
+  ros__parameters:
+    # 把这些内部 double 输出转发成同名 ROS2 话题（std_msgs/Float64）
+    forward_list: [
+      "/motor_demo/motor/velocity",          # 原始测速
+      "/motor_demo/motor/velocity_filtered", # 滤波后测速
+      "/motor_demo/motor/control_torque",    # 给电机的扭矩
+    ]
