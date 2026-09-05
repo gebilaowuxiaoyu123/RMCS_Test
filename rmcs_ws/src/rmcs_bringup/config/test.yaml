@@ -18,15 +18,12 @@ rmcs_executor:
       # 软件层：测速低通滤波
       - rmcs_core::controller::motor_demo::VelocityFilter -> motor_velocity_filter
 
-      # 角度指令桥(任务三)：订阅外部 /motor_demo/angle_cmd → 输出优弧角度误差 /motor_demo/angle_error
-      - rmcs_core::controller::motor_demo::AngleTargetController -> motor_angle_target
-      # - rmcs_core::controller::motor_demo::FixedTargetVelocity -> motor_fixed_target          # (固定速度模式备用)
+      # 【方向诊断模式】固定速度 2 rad/s + 纯速度环 —— 判断转向 & 隔离抖动
+      - rmcs_core::controller::motor_demo::FixedTargetVelocity -> motor_fixed_target
+      # - rmcs_core::controller::motor_demo::AngleTargetController -> motor_angle_target        # (角度模式备用)
       # - rmcs_core::controller::motor_demo::JoystickVelocityMapping -> motor_joystick_mapping  # (遥控器模式备用)
 
-      # 外环(角度环)：复用仓库 ErrorPidController —— 吃角度误差，出“目标速度”给内环
-      - rmcs_core::controller::pid::ErrorPidController -> motor_angle_pid_controller
-
-      # 内环(速度环)：复用仓库 PidController —— 速度误差 → 扭矩（沿用任务二）
+      # 内环(速度环)：复用仓库 PidController
       - rmcs_core::controller::pid::PidController -> motor_speed_pid_controller
 
       # 观测接口：把内部 double 数据转发成真实 ROS2 话题（供 Foxglove / ros2 topic 使用）
@@ -41,26 +38,25 @@ motor_test_hardware:
 #   ros__parameters:
 #     max_velocity: 5.0
 
-# motor_fixed_target:        # （固定速度模式备用：任务二的无遥控测试）
-#   ros__parameters:
-#     value: 2.0
-
-motor_angle_pid_controller:   # 外环：角度误差(rad) → 目标速度(rad/s)
+motor_fixed_target:        # 【方向诊断】恒速 2 rad/s
   ros__parameters:
-    measurement: /motor_demo/angle_error
-    control:     /motor_demo/target_velocity
-    kp: 2.0          # 角度→速度增益：先保守，大了抖、小了到位慢
-    ki: 0.0
-    kd: 0.0
-    # 保护：外环输出(目标速度)限幅，防止电机飞
-    output_min: -5.0
-    output_max: 5.0
-    integral_min: 0.0
-    integral_max: 0.0
+    value: 2.0
+
+# motor_angle_pid_controller:   # 外环（角度模式，诊断期间停用）
+#   ros__parameters:
+#     measurement: /motor_demo/angle_error
+#     control:     /motor_demo/target_velocity
+#     kp: 2.0
+#     ki: 0.0
+#     kd: 0.0
+#     output_min: -5.0
+#     output_max: 5.0
+#     integral_min: 0.0
+#     integral_max: 0.0
 
 motor_velocity_filter:
   ros__parameters:
-    cutoff_frequency: 20.0      # 滤波截止(Hz)：测速锯齿→调低(10~15)；电机拖沓→调高(40~60)
+    cutoff_frequency: 15.0      # 滤波截止(Hz)：kp 提高后更要压高频；还抖就再降到 10
     sampling_frequency: 1000.0  # 必须等于 update_rate
 
 motor_speed_pid_controller:
@@ -68,8 +64,8 @@ motor_speed_pid_controller:
     measurement: /motor_demo/motor/velocity_filtered   # 反馈：滤波后测速(rad/s)
     setpoint: /motor_demo/target_velocity   # 目标：外环(角度环)算出的目标速度
     control:     /motor_demo/motor/control_torque      # 输出：扭矩(N·m)给电机
-    kp: 1.0            # 实测：0.15 时小误差只有 -0.04N·m 推不动 → 提到 1.0
-    ki: 0.05           # 积分兜底：克服静摩擦死区，把最后几度顶到位
+    kp: 0.4            # 实测：kp=1.0 会 bang-bang 抖振 → 降到 0.4（阻尼）；力不够靠 ki
+    ki: 0.15           # 积分负责把最后一点顶到位（克服静摩擦），不怕慢
     kd: 0.0
     # 保护：扭矩限幅先收窄到 ±1 N·m（M3508 满幅≈6 N·m），调稳前别给大扭矩
     output_min: -1.0
