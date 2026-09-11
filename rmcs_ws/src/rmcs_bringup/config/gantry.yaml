@@ -1,0 +1,41 @@
+# ============================================================================
+# RMCS 龙门架（任务二 3.2）—— 左右两个 M3508 驱动两侧丝杆同步升降
+#   启动：ros2 launch rmcs_bringup rmcs.launch.py robot:=gantry
+#
+# 组件拓扑（都在 rmcs_core 里）：
+#   Gantry(硬件层)  → /gantry/{left,right}/{angle,velocity,torque,max_torque}
+#                   ← /gantry/{left,right}/control_torque
+#   GantryController(控制层) 读上面的话题 → 规划+同步+双环 → 写回 control_torque
+#   value_broadcaster：把话题转发给 Foxglove，调试用
+# ============================================================================
+rmcs_executor:
+  ros__parameters:
+    update_rate: 1000.0
+    components:
+      - rmcs_core::hardware::Gantry -> gantry_hardware
+      - rmcs_core::controller::gantry::GantryController -> gantry_controller
+      - rmcs_core::broadcaster::ValueBroadcaster -> value_broadcaster
+
+gantry_hardware:
+  ros__parameters:
+    # C 板的 USB 序列号（不是设备路径），换成你自己板子的
+    board_serial: "D4-6A83-030D-F3D0-9103-F8A5-1246"
+
+gantry_controller:
+  ros__parameters:
+    lead: 0.002              # 丝杆导程 2 mm/rev
+    gear_ratio: 1.0          # 电机输出轴直连丝杆
+    target_height: 0.0       # 目标高度 m
+
+    max_velocity: 0.05       # 升降速度上限 m/s
+    max_acceleration: 0.2    # 加速度上限 m/s²，"平稳"就靠它
+
+    sync_coefficient: 0.3    # 交叉耦合增益：太小纠偏慢，太大两侧互顶会抖
+
+    position_kp: 20.0        # 位置环（1/s）
+    position_ki: 0.0
+    position_kd: 0.0
+
+    velocity_kp: 0.3         # 速度环（N·m/(rad/s)）
+    velocity_ki: 0.0
+    velocity_kd: 0.001
