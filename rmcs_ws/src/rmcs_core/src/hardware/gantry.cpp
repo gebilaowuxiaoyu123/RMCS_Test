@@ -13,10 +13,6 @@
 
 namespace rmcs_core::hardware {
 
-// 龙门架硬件层：左右两个 M3508 各驱动一根丝杆，挂同一路 CAN、共用 0x200 帧。
-// 一个组件同时完成「驱动」和「反馈」：
-//   反馈 → /gantry/{left,right}/{angle,velocity,torque,max_torque}
-//   驱动 ← /gantry/{left,right}/control_torque
 class Gantry
     : public rmcs_executor::Component
     , public rclcpp::Node
@@ -30,8 +26,6 @@ public:
         , left_motor_(*this, *command_, "/gantry/left")
         , right_motor_(*this, *command_, "/gantry/right") {
 
-        // 丝杆高度要靠多圈角度换算，必须打开；
-        // reversed 把两侧正方向统一成"上升为正"，否则同步项符号会反。
         left_motor_.configure(
             device::DjiMotor::Config{device::DjiMotor::Type::kM3508, kLeftCanId}
                 .enable_multi_turn_angle());
@@ -44,13 +38,11 @@ public:
             *this, get_parameter("board_serial").as_string());
     }
 
-    // 反馈：解析 CAN 反馈帧 → 刷新两侧电机的 angle/velocity/torque/max_torque
     void update() override {
         left_motor_.update_status();
         right_motor_.update_status();
     }
 
-    // 驱动：读两侧的 control_torque → 打包进同一帧 0x200 下发
     void command_update() {
         auto packet = device::CanPacket8{};
         packet << left_motor_ << right_motor_;
