@@ -535,115 +535,486 @@ double integral_min = -inf, integral_max = inf;   // 默认无限制
 
 ---
 
-# 任务二 · 底盘运动学解算 + 龙门架控制
+# 任务二 · 底盘运动解算 + 龙门架运动
 
-> 接上文（任务一 · 三场景 PID 参数分析，已结束）。任务二含两小题：
-> **3.1 底盘运动学解算**（全向轮 / 舵轮逆解 + GeoGebra 可视化）、**3.2 龙门架双电机同步升降**（方案 + RMCS 控制组件）。
->
-> 进度：公式与思路已整理 ✅；GeoGebra 图、龙门架组件代码、真机/空跑验证 → TODO。
+## 一、3.1 底盘运动解算
+
+### 1.1 公共建系与约定
+
+- **坐标系**：车体固连系 $B$，原点取四轮几何中心，$x$ 轴指向车头，$y$ 轴指向车体左侧，$z$ 轴竖直向上；**绕 $z$ 轴逆时针为正**（右手系）。
+- **底盘速度**：$\boldsymbol{v}=(v_x,\ v_y,\ \omega)^{\mathrm{T}}$，单位 m/s、m/s、rad/s，$\omega$ 为绕 $z$ 轴的角速度，逆时针为正。
+- **车轮编号**：从**左前**起逆时针编号 $0,1,2,3$（0 左前 / 1 左后 / 2 右后 / 3 右前）。
+- **几何量**：第 $i$ 个轮心位置 $\boldsymbol{p}_i=R(\cos\varphi_i,\ \sin\varphi_i)^{\mathrm{T}}$，$\varphi_i=45^\circ+90^\circ i$；$R$ 为轮心到车心距离，$r$ 为轮半径。全部物理量取国际单位制。
+
+### 1.2 全向轮
+
+全向轮周边的小从动轮**只提供径向力、不提供侧向力**，因此轮子只能沿自身的**滚动方向（切向）**出力，轮心速度中只有切向分量能被电机驱动，侧向分量被从动轮自由滑动"吃掉"。第 $i$ 个轮的滚动切向单位矢量（由 $\boldsymbol{p}_i$ 逆时针转 $90^\circ$ 得到）：
+
+$$\boldsymbol{t}_i=(-\sin\varphi_i,\ \cos\varphi_i)^{\mathrm{T}}$$
+
+**(1) 只有平移**（$\omega=0$）
+
+轮 $i$ 的线速度就是 $\boldsymbol{v}$ 在 $\boldsymbol{t}_i$ 上的投影：
+
+$$v_i=\boldsymbol{t}_i\cdot(v_x,\ v_y)=-v_x\sin\varphi_i+v_y\cos\varphi_i\quad\Longrightarrow\quad \omega_i=\frac{v_i}{r}=\frac{-v_x\sin\varphi_i+v_y\cos\varphi_i}{r}$$
+
+代入 $\varphi_{0,1,2,3}=45^\circ,135^\circ,225^\circ,315^\circ$ 逐轮展开：
+
+$$\omega_0=\frac{\sqrt2}{2r}(-v_x+v_y),\qquad \omega_1=\frac{\sqrt2}{2r}(-v_x-v_y)$$
+
+$$\omega_2=\frac{\sqrt2}{2r}(v_x-v_y),\qquad \omega_3=\frac{\sqrt2}{2r}(v_x+v_y)$$
+
+**(2) 在此基础上加入自转 $\omega$**
+
+底盘以 $\omega$ 自转时，轮心处多出一项自转带来的速度 $\boldsymbol{\omega}\times\boldsymbol{p}_i$。由于 $\hat{z}\times\boldsymbol{p}_i=R\,\boldsymbol{t}_i$ **恰好沿着该轮切向**，这一项整份都落在有效方向上，所以直接加到 (1) 的标量里：
+
+$$v_i=-v_x\sin\varphi_i+v_y\cos\varphi_i+R\omega\quad\Longrightarrow\quad \omega_i=\frac{v_i}{r}=\frac{-v_x\sin\varphi_i+v_y\cos\varphi_i+R\omega}{r}$$
+
+即逆解（在前一步的平移项后面直接加 $R\omega$）：
+
+$$\omega_0=\frac{1}{r}\left[\tfrac{\sqrt2}{2}(-v_x+v_y)+R\omega\right],\qquad \omega_1=\frac{1}{r}\left[-\tfrac{\sqrt2}{2}(v_x+v_y)+R\omega\right]$$
+
+$$\omega_2=\frac{1}{r}\left[\tfrac{\sqrt2}{2}(v_x-v_y)+R\omega\right],\qquad \omega_3=\frac{1}{r}\left[\tfrac{\sqrt2}{2}(v_x+v_y)+R\omega\right]$$
+
+**可视化（GeoGebra）**：设滑动条 `vx, vy, ω, R, r`；画车体矩形、4 个轮心 $\boldsymbol{p}_i$、每轮的切向单位矢量 $\boldsymbol{t}_i$（灰）与轮心速度矢量 $v_i\boldsymbol{t}_i$（红）。
+判据：令 $v_x=v_y=0,\ \omega\neq0$，4 个红箭头应几何上共切向；令 $\omega=0$，4 个红箭头应互相平行。
+> 【图 1：GeoGebra 截图，待插入】
+
+### 1.3 舵轮
+
+舵轮由两个电机组成：**转向电机**决定轮子朝向 $\theta_i$，**驱动电机**决定轮子转速。轮心线速度矢量 = 平动速度 + 自转贡献：
+
+$$\boldsymbol{c}_i=(v_x,\ v_y)+\omega\,\hat{z}\times\boldsymbol{p}_i=(v_x-R\omega\sin\varphi_i,\ \ v_y+R\omega\cos\varphi_i)$$
+
+把分量写开，即逐轮展开：
+
+$$c_{ix}=v_x-R\omega\sin\varphi_i,\qquad c_{iy}=v_y+R\omega\cos\varphi_i$$
+
+要求轮子"朝着自己要走的方向"，且轮速等于该方向上的速率：
+
+$$\boxed{\ \theta_i=\operatorname{atan2}\!\left(v_y+R\omega\cos\varphi_i,\ \ v_x-R\omega\sin\varphi_i\right)\ }$$
+
+$$\boxed{\ \omega_i=\frac{\|\boldsymbol{c}_i\|}{r}=\frac{\sqrt{(v_x-R\omega\sin\varphi_i)^2+(v_y+R\omega\cos\varphi_i)^2}}{r}\ }$$
+
+编号与 $\varphi_i$ 同 1.1。因为 $\theta_i$ 已经把轮子对准了 $\boldsymbol{c}_i$，所以 $\omega_i$ 恒为非负，公式里不需要再带符号。
+
+**两处必须补的工程修正**（不做则实车会失效）：
+
+- **死区**：$\|\boldsymbol{c}_i\|\to0$ 时 $\operatorname{atan2}$ 的方向由噪声决定 → 保持上一周期的角度（或改用加速度方向定角）；
+- **就近转向**：$\theta_i$ 加减 $\pi$、同时把 $\omega_i$ 反号，结果等价，但省掉转向电机绕 $180^\circ$ 的时间。
+
+**可视化（GeoGebra）**：每个轮画两个箭头——朝向箭头（方向 $\theta_i$）与速率箭头（沿 $\theta_i$，长度 $\propto\omega_i r$）。
+判据：纯平移（$\omega=0$）时 4 轮 $\theta_i$ 完全相同；原地自转（$v_x=v_y=0$）时 4 轮 $\theta_i$ 为各自切向、且 4 轮 $\omega_i$ 相等。
+> 【图 2：GeoGebra 截图，待插入】
+
+### 1.4 与仓库实现对照（自检用）
+
+| 环节 | 仓库位置 |
+|---|---|
+| 全向轮逆解 / 正解 | `rmcs_core/src/controller/chassis/omni_wheel_controller.cpp`（`a_plus_b = R_x+R_y`，等价于本文 $\varphi$ 取 $45^\circ$ 族） |
+| 舵轮逆解 | `steering_wheel_controller.cpp: calculate_steering_control_torques()`（`wheel_velocity_x/y` 即 $\boldsymbol{c}_i$；`dot_r_squared > 1e-2` 即死区判定） |
+| 舵轮正解 | `steering_wheel_status.cpp: calculate_chassis_velocity()` |
+
+> ⚠ 仓库用的是它自己一套约定（轮序 LF/LB/RB/RF、$R$ 拆成 $R_x,R_y$）。对照时**要把约定一起对照**，只抄数字必错。
 
 ---
 
-## 一、3.1 底盘运动学解算
+## 二、3.2 龙门架运动
 
-### 1.1 全向轮逆解
+### 2.1 机构与符号
 
-**建系与编号**：底盘固连系，x 指前、y 指左、绕 z 逆时针为正（与 RMCS `BaseLink::DirectionVector` 一致）。四轮编号取 `LF/RF/LB/RB`，第 i 轮向径角 $\varphi_i$（轮心相对车心的方向，逆时针为正）。
+两个直流电机分别驱动龙门架左右两侧的丝杆，带动横梁升降。
 
-**关键一步**：把底盘速度投影到该轮滚动方向（切向）。轮滚动切向单位向量取
-$$t_i = (-\sin\varphi_i,\ \cos\varphi_i)$$
-轮心线速度 = 平动投影 + 底盘自转在该轮心处的贡献 $R\omega$：
+| 符号 | 含义 |
+|---|---|
+| $h_L,\ h_R$ | 左 / 右侧横梁高度（m） |
+| $h^*$ | 目标高度（m） |
+| $e=h_L-h_R$ | **同步误差**，横梁倾角 $\gamma\approx\arctan(e/L)$，$L$ 为两侧跨距 |
+| $p$ | 丝杆导程（m/rev） |
+| $i$ | 电机输出轴到丝杆的传动比 |
+| $\theta_i,\ \omega_i$ | 第 $i$ 侧电机的多圈角度（rad）与转速（rad/s） |
 
-$$v_i = -v_x\sin\varphi_i + v_y\cos\varphi_i + R\,\omega$$
+### 2.2 方案
 
-因此第 i 轮目标角速度：
-$$\omega_i = \frac{v_i}{r} = \frac{-v_x\sin\varphi_i + v_y\cos\varphi_i + R\,\omega}{r}$$
+**核心问题**：两侧负载不同 → 相同指令下负载重的一侧走得慢 → 横梁出现高度差 $e$，越积越大导致歪斜、卡死。所以不能"两边各自跟自己的指令"，必须**把左右高度差反馈回去主动纠偏**。
 
-> **校验方法**：对照仓库 `rmcs_core/src/controller/chassis/omni_wheel_controller.cpp` 的逆解实现，以及舵轮版里
-> `wheel_velocity_x = vx − R·vz·sinφ`、`wheel_velocity_y = vy + R·vz·cosφ`
-> 再向轮方向投影 → 应与上式一致。φ 取 0/90/180/270（前后左右布置）或 45/135/225/315（X 布置）均可推回。
+方案分三层，逐层落地：
 
-**可视化（GeoGebra）**：滑动条 `vx、vy、ω、R、r`；画车体（矩形）+ 4 个轮心 + 每轮线速度矢量箭头（方向=滚动切向、长度=速率）。用"纯旋转（vx=vy=0, ω≠0）时四箭头同为切向"检查公式正确性。TODO：插入 GeoGebra 截图/动图。
+**① 规划层——保证"平稳"**
 
-### 1.2 舵轮逆解（Steering / Swerve）
+把目标高度 $h^*$ 经**斜坡 / 梯形规划**变成带限幅的参考速度 $v_{plan}$：限制最大速度 $v_{max}$、最大加速度 $a_{max}$，并用"剩余距离 ≤ 制动距离"提前减速，避免到达时冲击：
 
-舵轮要同时给两个量：**转向角 θᵢ**（轮子朝哪）与**驱动角速度 ωᵢ**（轮子转多快）。
+$$v_{plan}=\begin{cases}\operatorname{sgn}(h^*-h)\cdot v_{max},&|h^*-h|>\dfrac{v_{plan}^2}{2a_{max}}\\[8pt]0,&\text{否则}\end{cases}$$
 
-轮心线速度矢量（平动 + 自转在轮心处的切向速度）：
-$$\vec c_i = \begin{pmatrix} v_x - R\,\omega\sin\varphi_i \\ v_y + R\,\omega\cos\varphi_i \end{pmatrix}$$
+其中 $h$ 取左右高度的平均（整梁高度），$v_{plan}$ 自身按 $\pm a_{max}\Delta t$ 限斜率。
 
-- 转向角 = 线速度方向：
-$$\theta_i = \mathrm{atan2}\big(v_y + R\,\omega\cos\varphi_i,\ \ v_x - R\,\omega\sin\varphi_i\big)$$
-- 驱动转速 = 速率除以半径（方向已由 θ 对准，无需负号）：
-$$\omega_i = |\vec c_i|\,/\,r$$
+**② 协调层——保证"同步 + 抗偏载"**
 
-**工程细节（对应仓库 `steering_wheel_controller.cpp` 的做法）**
-- θ 可折进 $\pm\pi/2$：舵轮可反装驱动，避免转向电机绕远路（仓库 `.unaryExpr` 那段）；
-- 死区：$|\vec c_i|$ 很小时 atan2 无意义，仓库改用**加速度方向**定角；加速度也≈0 时输出 NaN/0 扭矩——这是"公式之外"的工程点，值得写进报告。
+左右各一个位置环得到修正速度，再叠加**交叉耦合项** $k_s e$：
 
-**可视化**：每个轮画两个量——转向箭头（方向 θᵢ）与驱动箭头（沿 θᵢ、长度 $\propto \omega_i r$）。纯平移时四轮转向一致、纯旋转时四轮切向——正确性判据。TODO：插图。
+$$v_L^*=v_{plan}+K_p\,(h^*-h_L)+k_s\,(h_L-h_R)$$
 
----
+$$v_R^*=v_{plan}+K_p\,(h^*-h_R)-k_s\,(h_L-h_R)$$
 
-## 二、3.2 龙门架运动（双电机同步升降）
+最后一项 $k_s(h_L-h_R)$ 就是**交叉耦合**：对方走得慢、高度落后时，自己这边被多给速度。
 
-### 2.1 问题本质与控制需求
+**为什么这样就能抗偏载**：负载重的一侧速度掉下去 → 出现 $h_L-h_R\neq0$ → 这一项让**重的那侧被多给速度、轻的那侧被少给**，偏差被自动拉回零；偏载越大，纠偏量越大，因此不需要事先知道负载是多少。$k_s$ 相当于横梁的虚拟刚度：太小纠偏慢，太大左右互顶产生低频振荡（实测从 $0.1\sim0.5$ 起调）。
 
-两侧丝杆电机负载不同 → 升降不同步 → 横梁倾斜/卡死。因此不只是"各自跟目标"，还要**主动消除同步误差**
-$$e_{sync} = h_L - h_R$$
+**③ 执行层——速度环与保护**
 
-| 需求 | 含义 | 后果 |
-|---|---|---|
-| 平缓 | 目标轨迹限速/限加速度（梯形或 S 形 profile） | 阶跃冲击、结构晃动 |
-| 两侧同步 | 横梁保持水平 | 卡死、倾斜、飞镖 Pitch 不准 |
-| 左右解耦抗偏载 | 负载重一侧不落后 | 一侧爬不动另一侧空转 |
+每侧再串一个速度环，把目标速度换成扭矩下发给电机。另加两条保护：
 
-### 2.2 反馈选择 / 无外部传感器时如何估计姿态
+- **堵转保护**：$|\tau|$ 顶到上限而 $|\omega|$ 很小 → 判定卡死，**两侧同时停**（只停一侧的话另一侧会继续顶，把横梁扭坏）；
+- **扭矩限幅**：不超过电机反馈的 `max_torque`。
 
-1. **电机自带编码器（首选，RMCS 的 DJI/LK 电机都有多圈角）**：丝杆高度由轴转角换算
-$$h = \frac{\theta_{motor}}{2\pi} \cdot \frac{lead}{ratio} + h_0$$
-（θ：电机多圈角，lead：丝杆导程 mm/rev，ratio：减速比）。左右各算各的 → **用两侧编码器差即可估计横梁倾斜**，这是"无外部传感器"的正解（以轴代梁）。
-2. 要抗丝杆打滑/背隙才加外部传感器：拉线编码器 / 磁栅尺直接测梁高，接近开关做零点归位。
-3. 完全没有编码器只能开环 → 无法做同步闭环，报告中应点明这一点。
-
-### 2.3 控制方案：目标 profile + 双位置环 + 交叉耦合
-
+```mermaid
+flowchart LR
+    T["目标高度 h*"] --> P["① 规划<br/>限速 / 限加速"]
+    P --> S["② 位置环 + 交叉耦合"]
+    E["编码器 → h_L, h_R"] --> S
+    S --> V["③ 速度环 ×2"] --> M["M3508 ×2 → 丝杆"]
+    M --> E
 ```
-目标 h*(t) ── S形/梯形 profile（限速、限加速度）──►
-   左位置环: vL_ref = posPID(h* - hL)         # 高度→目标速度
-   右位置环: vR_ref = posPID(h* - hR)
-   同步纠偏: vL_ref += k_sync · (hL - hR)      # 交叉耦合
-            vR_ref -= k_sync · (hL - hR)
-   左右速度内环（各一）→ 扭矩 → 电机
+
+### 2.3 反馈选择与无外部传感器时的姿态估计
+
+**反馈怎么挑：**
+
+| 方案 | 测得量 | 优点 | 缺点 |
+|---|---|---|---|
+| 电机自带编码器 | $\theta_L,\theta_R$（多圈） | 零额外硬件，RMCS 的 DJI / LK 电机直接输出 | 丝杆背隙、打滑会累积误差 |
+| 拉线编码器 / 磁栅尺 | 两侧绝对高度 | 抗背隙，直接测真实高度 | 要装、占空间、线缆易损 |
+| 倾角传感器 | 横梁倾角 $\gamma$ | 直接给出同步量，与导程无关 | 动态慢，加减速时受惯性干扰 |
+| 限位 / 接近开关 | 零位 | 便宜，提供绝对基准 | 只有 1 bit，只能校准 |
+
+**选择结论**：先用**电机编码器**——$h_L$、$h_R$ 及其差值闭环所需的信息它已经全给了，不需要额外传感器；再配一个**限位开关**上电归零消除累积误差。倾角 / 拉线编码器留作精度不够时的升级项。
+
+**无外部传感器时如何估计姿态**：把电机多圈角当作里程计积分。丝杆是回转→直线传动，两侧高度
+
+$$h_i=\frac{\theta_i}{2\pi}\cdot\frac{p}{i}+h_{0,i}\quad\Longrightarrow\quad \gamma\approx\arctan\frac{h_L-h_R}{L}$$
+
+即"以轴代梁"。它与真实姿态的偏差主要来自两处：**背隙**（只在换向时显现，表现为回差）和**打滑**（单向漏计）。前者可通过让丝杆始终单向受压 / 预紧来抑制，后者靠限位开关周期性复位校正。若还不满足精度，再把倾角传感器与这个估计值做**互补滤波**（低频信外部、高频信编码器）。
+
+若两侧连编码器都没有，就只能开环按固定上升时间走，**无法**保证同步（负载一变就偏），此时只能依靠机械同步（同步带 / 连杆）。
+
+### 2.4 RMCS 控制组件
+
+按 RMCS 的组件模型拆成两个：**硬件层**负责驱动与反馈（CAN 收发、电机状态），**控制层**只负责算指令。两者靠话题自动配对，跑在同一个 1 kHz 单线程循环里。
+
+#### (1) 硬件层 `Gantry`（电机驱动 + 反馈）
+
+文件：`rmcs_core/src/hardware/gantry.cpp`
+
+```cpp
+#include <memory>
+#include <span>
+#include <utility>
+
+#include <librmcs/board/rmcs_board_lite.hpp>
+#include <librmcs/data/datas.hpp>
+#include <rclcpp/node.hpp>
+#include <rclcpp/node_options.hpp>
+#include <rmcs_executor/component.hpp>
+
+#include "hardware/device/can_packet.hpp"
+#include "hardware/device/dji_motor.hpp"
+
+namespace rmcs_core::hardware {
+
+// 龙门架硬件层：左右两个 M3508 各驱动一根丝杆，挂同一路 CAN、共用 0x200 帧
+class Gantry
+    : public rmcs_executor::Component
+    , public rclcpp::Node
+    , public librmcs::board::RmcsBoardLite::Callback {
+public:
+    Gantry()
+        : Node{
+              get_component_name(),
+              rclcpp::NodeOptions{}.automatically_declare_parameters_from_overrides(true)}
+        , gantry_command_(
+              create_partner_component<GantryCommand>(get_component_name() + "_command", *this))
+        , left_motor_(*this, *gantry_command_, "/gantry/left")
+        , right_motor_(*this, *gantry_command_, "/gantry/right") {
+
+        // 丝杆高度靠多圈角度换算，必须打开；reversed 用来把两侧正方向统一到"上升为正"
+        left_motor_.configure(
+            device::DjiMotor::Config{device::DjiMotor::Type::kM3508, 1}
+                .enable_multi_turn_angle());
+        right_motor_.configure(
+            device::DjiMotor::Config{device::DjiMotor::Type::kM3508, 2}
+                .set_reversed()
+                .enable_multi_turn_angle());
+
+        board_ = std::make_unique<librmcs::board::RmcsBoardLite>(
+            *this, get_parameter("board_serial").as_string());
+    }
+
+    void update() override {
+        left_motor_.update_status();
+        right_motor_.update_status();
+    }
+
+    // 反馈：CAN 收帧 → 解析成 /gantry/{left,right}/{angle,velocity,torque,max_torque}
+    void can_receive_callback(const Spec::Can& can, const View::Can& data) override {
+        if (can != Spec::kCans.kCan1)
+            return;
+        left_motor_.match_then_store_status(data.can_id, data.can_data);
+        right_motor_.match_then_store_status(data.can_id, data.can_data);
+    }
+
+private:
+    class GantryCommand : public rmcs_executor::Component {
+    public:
+        explicit GantryCommand(Gantry& owner)
+            : owner_(owner) {}
+        void update() override { owner_.command_update(); }
+
+    private:
+        Gantry& owner_;
+    };
+
+    // 驱动：读 /gantry/{left,right}/control_torque → 打包成 CAN 帧下发
+    void command_update() {
+        board_->start_transmit().can_transmit(
+            Spec::kCans.kCan1,
+            {
+                .can_id = 0x200, // M3508 id 1~4 共用同一帧，每电机占 2 字节
+                .can_data =
+                    device::CanPacket8{
+                        left_motor_.generate_command(),
+                        right_motor_.generate_command(),
+                        device::CanPacket8::PaddingQuarter{},
+                        device::CanPacket8::PaddingQuarter{},
+                    }
+                        .as_bytes(),
+            });
+    }
+
+    std::unique_ptr<librmcs::board::RmcsBoardLite> board_;
+    std::shared_ptr<GantryCommand> gantry_command_;
+
+    device::DjiMotor left_motor_, right_motor_;
+};
+
+} // namespace rmcs_core::hardware
+
+#include <pluginlib/class_list_macros.hpp>
+
+PLUGINLIB_EXPORT_CLASS(rmcs_core::hardware::Gantry, rmcs_executor::Component)
 ```
 
-- 平缓靠 profile：`max_velocity / max_acceleration` 做成可配参数；
-- 同步靠交叉耦合：重的一侧落后 → $e_{sync}\ne 0$ → 自动"多推重侧、少推轻侧"；$k_{sync}$ 相当于横梁的虚拟刚性，别贪大（会振荡）。
+要点：
 
-### 2.4 RMCS 组件划分（照仓库套路）
+- 两个电机自动注册 `/gantry/left|right/{angle, velocity, torque, max_torque}` 输出和 `/gantry/left|right/control_torque` 输入——**这就是要求的"电机的驱动和反馈"**；
+- 同一路 CAN、id 1/2 → 一次 `can_transmit` 把两路扭矩打包进 `0x200` 帧；
+- `enable_multi_turn_angle()` 打开多圈角度，丝杆高度才能从角换算出来；
+- `set_reversed()` 把某一侧正方向翻过来（两侧电机镜像安装时必需，否则同步项符号会反）。
 
-| 层 | 文件 / 类 | 职责 |
-|---|---|---|
-| 目标源 | `GantryTargetController`（仿 AngleTargetController） | 给 h*(t)：固定/斜坡/方波，yaml 切换 |
-| 控制器 | `GantryController` | profile + 左右位置环 + 交叉耦合 → 出左右目标速度 |
-| PID 块 | 复用 `ErrorPidController` / `PidController`（yaml 装配，外置可独立调参） | 位置环→速度环→扭矩 |
-| 硬件 | `GantryHardware`（仿 steering-hero 的 Board 写法） | C 板 CAN，两电机注册 `/gantry/left`、`/gantry/right` 的 angle/velocity/torque |
-| 配置 | `config/gantry.yaml` | 组件列表 + 左右 PID + 导程/减速比 + profile 限幅 |
+#### (2) 控制层 `GantryController`（规划 + 同步 + 双环）
 
-**"接入 C 板能跑（无实物）"**：保证 `colcon build` + `ros2 launch rmcs_bringup rmcs.launch.py robot:=gantry` 能起、话题通；无实物时用 `value_broadcaster` + Foxglove 看指令链；接 C 板后先空载低速验证编码器方向/零位，再上 profile 闭环。组件内用 `.ready()` 兜底（没接电机/NaN → 输出 0 扭矩）才能安全空跑。
+文件：`rmcs_core/src/controller/gantry/gantry_controller.cpp`
 
-TODO：龙门架组件骨架代码 + `gantry.yaml` + 跑通验证记录。
+```cpp
+#include <algorithm>
+#include <cmath>
+#include <numbers>
+
+#include <eigen3/Eigen/Dense>
+#include <rclcpp/node.hpp>
+#include <rclcpp/node_options.hpp>
+#include <rmcs_executor/component.hpp>
+
+#include "controller/pid/matrix_pid_calculator.hpp"
+
+namespace rmcs_core::controller::gantry {
+
+// 龙门架控制器：目标规划 + 左右位置环 + 交叉耦合同步 + 左右速度环
+class GantryController
+    : public rmcs_executor::Component
+    , public rclcpp::Node {
+public:
+    GantryController()
+        : Node{
+              get_component_name(),
+              rclcpp::NodeOptions{}.automatically_declare_parameters_from_overrides(true)}
+        , lead_(get_parameter("lead").as_double())
+        , gear_ratio_(get_parameter("gear_ratio").as_double())
+        , sync_coefficient_(get_parameter("sync_coefficient").as_double())
+        , max_velocity_(get_parameter("max_velocity").as_double())
+        , max_acceleration_(get_parameter("max_acceleration").as_double())
+        , position_pid_(
+              get_parameter("position_kp").as_double(), get_parameter("position_ki").as_double(),
+              get_parameter("position_kd").as_double())
+        , velocity_pid_(
+              get_parameter("velocity_kp").as_double(), get_parameter("velocity_ki").as_double(),
+              get_parameter("velocity_kd").as_double()) {
+
+        // 反馈：硬件层 Gantry 注册的电机状态
+        register_input("/gantry/left/angle", left_angle_);
+        register_input("/gantry/right/angle", right_angle_);
+        register_input("/gantry/left/velocity", left_velocity_);
+        register_input("/gantry/right/velocity", right_velocity_);
+        register_input("/gantry/left/max_torque", left_max_torque_);
+        register_input("/gantry/right/max_torque", right_max_torque_);
+        register_input("/predefined/update_rate", update_rate_, false);
+
+        register_output("/gantry/target_height", target_height_);
+        register_output("/gantry/left/control_torque", left_control_torque_);
+        register_output("/gantry/right/control_torque", right_control_torque_);
+
+        *target_height_ = get_parameter("target_height").as_double();
+    }
+
+    void before_updating() override {
+        if (!update_rate_.ready())
+            update_rate_.make_and_bind_directly(1000.0);
+    }
+
+    void update() override {
+        const double dt = update_dt_();
+
+        // 没有反馈（未接 C 板 / 电机掉线）→ 输出 0 扭矩，保证空跑安全
+        if (!left_angle_.ready() || !right_angle_.ready()) {
+            *left_control_torque_ = 0.0;
+            *right_control_torque_ = 0.0;
+            return;
+        }
+
+        // ── 反馈：电机多圈角 → 丝杆高度（"以轴代梁"） ──
+        const double h_left = angle_to_height(*left_angle_);
+        const double h_right = angle_to_height(*right_angle_);
+        const double h = 0.5 * (h_left + h_right);
+
+        // ── ① 规划层：限速 + 限加速 ──
+        const double height_error = *target_height_ - h;
+        const double stopping_distance =
+            planned_velocity_ * planned_velocity_ / (2.0 * max_acceleration_);
+        const double desired_velocity = std::abs(height_error) > stopping_distance
+                                          ? std::copysign(max_velocity_, height_error)
+                                          : 0.0;
+        planned_velocity_ += std::clamp(
+            desired_velocity - planned_velocity_, -max_acceleration_ * dt, max_acceleration_ * dt);
+
+        // ── ② 协调层：位置环 + 交叉耦合。误差_i = (h*-h_i) ∓ k·(h_L-h_R)，高的那侧被扣速度 ──
+        const Eigen::Vector2d position_error{*target_height_ - h_left, *target_height_ - h_right};
+        const Eigen::Vector2d relative_position{h_left - h_right, h_right - h_left};
+
+        Eigen::Vector2d velocity_setpoints =
+            Eigen::Vector2d::Constant(planned_velocity_)
+            + position_pid_.update(position_error - sync_coefficient_ * relative_position);
+        velocity_setpoints = velocity_setpoints.cwiseMax(-max_velocity_).cwiseMin(max_velocity_);
+
+        // ── ③ 执行层：速度环 → 扭矩，限幅 + 堵转两侧同停 ──
+        const Eigen::Vector2d motor_velocity_setpoints{
+            line_to_motor_velocity(velocity_setpoints[0]), line_to_motor_velocity(velocity_setpoints[1])};
+        const Eigen::Vector2d measured_velocity{*left_velocity_, *right_velocity_};
+
+        const Eigen::Vector2d torque_limit{*left_max_torque_, *right_max_torque_};
+        Eigen::Vector2d torques = velocity_pid_.update(motor_velocity_setpoints - measured_velocity);
+        torques = torques.cwiseMax(-torque_limit).cwiseMin(torque_limit);
+
+        // 扭矩顶到上限却几乎不动 → 判定堵转，两侧一起停（单侧硬顶会扭坏横梁）
+        const bool blocked =
+            (std::abs(measured_velocity[0]) < 0.5 && std::abs(torques[0]) >= 0.9 * torque_limit[0])
+            || (std::abs(measured_velocity[1]) < 0.5 && std::abs(torques[1]) >= 0.9 * torque_limit[1]);
+        if (blocked) {
+            torques.setZero();
+            position_pid_.reset();
+            velocity_pid_.reset();
+        }
+
+        *left_control_torque_ = torques[0];
+        *right_control_torque_ = torques[1];
+    }
+
+private:
+    double update_dt_() const {
+        if (update_rate_.ready() && std::isfinite(*update_rate_) && *update_rate_ > 1e-6)
+            return 1.0 / *update_rate_;
+        return 1e-3;
+    }
+
+    // 电机输出轴角(rad) → 横梁高度(m)；导程 p、传动比 i
+    double angle_to_height(double angle) const {
+        return angle / (2.0 * std::numbers::pi) * lead_ / gear_ratio_;
+    }
+    // 横梁线速度(m/s) → 电机输出轴角速度(rad/s)
+    double line_to_motor_velocity(double velocity) const {
+        return velocity * 2.0 * std::numbers::pi * gear_ratio_ / lead_;
+    }
+
+    double lead_, gear_ratio_, sync_coefficient_, max_velocity_, max_acceleration_;
+    double planned_velocity_ = 0.0;
+
+    pid::MatrixPidCalculator<2> position_pid_, velocity_pid_;
+
+    InputInterface<double> left_angle_, right_angle_, left_velocity_, right_velocity_;
+    InputInterface<double> left_max_torque_, right_max_torque_, update_rate_;
+    OutputInterface<double> target_height_, left_control_torque_, right_control_torque_;
+};
+
+} // namespace rmcs_core::controller::gantry
+
+#include <pluginlib/class_list_macros.hpp>
+
+PLUGINLIB_EXPORT_CLASS(
+    rmcs_core::controller::gantry::GantryController, rmcs_executor::Component)
+```
+
+说明：位置环用 `pid::MatrixPidCalculator<2>` 一次算两侧（与仓库爬坡机构的 `dual_motor_sync_control()` 同构），同步项写在误差向量里，避免两个 `PidCalculator` 各存一份积分状态。位置环增益量纲是 1/s（输入 m、输出 m/s），速度环量纲是 N·m/(rad/s)。
+
+#### (3) 配置 `rmcs_bringup/config/gantry.yaml`
+
+```yaml
+rmcs_executor:
+  ros__parameters:
+    update_rate: 1000.0
+    components:
+      - rmcs_core::hardware::Gantry -> gantry_hardware
+      - rmcs_core::controller::gantry::GantryController -> gantry_controller
+      - rmcs_core::broadcaster::ValueBroadcaster -> value_broadcaster   # 调试用
+
+gantry_hardware:
+  ros__parameters:
+    board_serial: "D4-6A83-030D-F3D0-9103-F8A5-1246"   # C 板 USB 序列号
+
+gantry_controller:
+  ros__parameters:
+    lead: 0.002              # 丝杆导程 2 mm/rev
+    gear_ratio: 1.0          # 电机输出轴直连丝杆
+    target_height: 0.0
+    max_velocity: 0.05       # 升降速度上限 m/s
+    max_acceleration: 0.2    # 加速度上限 m/s²（"平稳"就靠它）
+    sync_coefficient: 0.3    # 交叉耦合增益，太大左右互顶会振荡
+    position_kp: 20.0        # 1/s
+    position_ki: 0.0
+    position_kd: 0.0
+    velocity_kp: 0.3         # N·m/(rad/s)
+    velocity_ki: 0.0
+    velocity_kd: 0.001
+```
+
+#### (4) 注册到插件表 `rmcs_core/plugins.xml`
+
+```xml
+<class type="rmcs_core::hardware::Gantry" base_class_type="rmcs_executor::Component" />
+<class type="rmcs_core::controller::gantry::GantryController" base_class_type="rmcs_executor::Component" />
+```
+
+#### (5) 没有实物怎么验证（"接入 C 板能跑"）
+
+1. 编译：`colcon build --packages-select rmcs_core rmcs_bringup`；
+2. 启动：`ros2 launch rmcs_bringup rmcs.launch.py robot:=gantry`，用 `value_broadcaster` + Foxglove 看 `/gantry/left/angle`、`/gantry/right/angle`、`/gantry/left|right/control_torque`；
+3. **无实物时 CAN 上没有反馈帧**，`/gantry/*/angle` 恒为 0，位置环会一直算误差并出扭矩 → 验证阶段先把 `target_height` 与 `max_velocity` 置 0，只确认话题链路通、无异常；
+4. 接 C 板后先空载低速上升：确认两侧**方向一致**（不一致就调 `set_reversed()`）、限位触发正确，再逐级放大 `sync_coefficient` 观察同步效果。
 
 ---
 
-## 三、任务二 · B 站参考
+## 三、参考
 
-| 主题 | 视频（UP 主） | 链接 |
-|---|---|---|
-| 全向轮底盘解算（RM 战队培训，最贴题） | 【26赛季电控培训】P6 全向轮底盘解算（青岛科大 YKTKEMIAO） | [BV1FpnfzNEFc](https://www.bilibili.com/video/BV1FpnfzNEFc/) |
-| 全向轮解算 + 代码生成 | 全向轮运动学解算与 GPT 代码生成（西格螺） | [BV1rX4y1p7n7](https://www.bilibili.com/video/BV1rX4y1p7n7/) |
-| 麦轮解算（对照） | 麦克纳姆轮解算·麦轮解算（bili我最烦取名字了） | [BV13yBuYEEMf](https://www.bilibili.com/video/BV13yBuYEEMf/) |
-| 麦轮系统教程（对照） | 底盘运动学解析系统性教程（三）｜麦克纳姆轮小车（WHEELTEC） | [BV1Tyw9e8EK5](https://www.bilibili.com/video/BV1Tyw9e8EK5/) |
-| 舵轮运动学（演示） | 4 舵轮正运动学解算（_无往而不胜_） | [BV1LE42157oM](https://www.bilibili.com/video/BV1LE42157oM/) |
-| 舵轮可视化 | 舵轮运动学可视化（bilibili_duhuo） | [BV1Akjjz2ESh](https://www.bilibili.com/video/BV1Akjjz2ESh/) |
-| 龙门同步控制 | 汇川伺服：龙门同步控制的 2 种方案（工控小黄人） | [BV1cC4y1M7Uh](https://www.bilibili.com/video/BV1cC4y1M7Uh/) |
+| 资料 | 链接 |
+|---|---|
+| 【5.3】底盘的运动学与动力学解算（中科大 RM 电控合集，TrojanGeneric）——逆解 19:02 / 动力学 46:15 / 正解 48:42 | [BV1toH6ekEfJ](https://www.bilibili.com/video/BV1toH6ekEfJ/) |
+| 上述视频配套开源仓库（含底盘解算代码与讲义） | [yssickjgd/robowalker_train](https://github.com/yssickjgd/robowalker_train) |
+| RMCS 源码：`omni_wheel_controller.cpp`、`steering_wheel_controller.cpp`、`chassis_climber_controller.cpp` | 本仓库 |
+
