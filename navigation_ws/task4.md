@@ -22,10 +22,9 @@ neighbors.png       同一张图 4 邻域 vs 8 邻域对比
 改地图就改 `src/main.cpp` 的 `build_maps()`：
 
 ```cpp
-GridMap tiny(5, 5);              // 建一张 5×5 的图
-tiny.fill_border(1);             // 四周加 1 格厚边墙
-tiny.set_occupied({2, 2});       // (2,2) 放一个障碍
-maps.push_back({"tiny_5x5", std::move(tiny), {1, 1}, {3, 3}});
+GridMap tiny(5, 5);                        // 建一张 5×5 的图
+tiny.fill_rect(GridPoint{2, 1}, 1, 3);     // 从 (2,1) 开始画一道 1×3 的竖墙
+maps.push_back({"tiny_5x5", std::move(tiny), {0, 0}, {4, 4}});
 //               ↑名字                        ↑起点     ↑终点
 ```
 
@@ -243,7 +242,7 @@ SearchResult astar(const GridMap& map, GridPoint start, GridPoint goal, const AS
 } // namespace nav
 ```
 
-图上颜色对应：空地白、障碍深灰、已展开浅蓝、待办清单浅橙、最终路径红线、起点绿、终点蓝。
+图上颜色对应：空地白、障碍深灰、已展开浅蓝、待办清单浅橙、最终路径红线、起点绿、终点蓝。格子够大时（≥12 像素）会画上浅灰网格线，方便直接数格子。
 
 ## 三、结果
 
@@ -251,16 +250,16 @@ SearchResult astar(const GridMap& map, GridPoint start, GridPoint goal, const AS
 
 | 地图 | 尺寸 | 展开格数 | 路径点数 | 路径代价 |
 |---|---|---|---|---|
-| tiny_5x5 | 5×5 | 6 | 5 | 4.0 |
-| regular_12x12 | 12×12 | 63 | 34 | 34.2 |
+| tiny_5x5 | 5×5 | 12 | 8 | 7.4 |
+| regular_12x12 | 12×12 | 88 | 41 | 41.7 |
 | rooms | 60×40 | 559 | 60 | 71.8 |
 | random | 60×40 | 609 | 69 | 77.9 |
 
-**5×5 最小地图**：边界一圈墙，中心一个障碍。搜索只展开了 6 格就找到路，路径斜穿过去（代价 4.0 = 4 步斜走）。
+**5×5 最小地图**：中间竖着一道 1×3 的墙，起点在左上角、终点在右下角，路径得绕过去。展开 12 格，路径 8 个点、代价 7.4（1 步斜走 1.41 + 6 步直走 6）。
 
 ![5x5 地图](task4/output/tiny_5x5.png)
 
-**12×12 规则地图**：三道错开的墙，右边留口、左边留口、右边留口，所以路径是个 S 形。展开 63 格。
+**12×12 规则地图**：三道墙错开（右边留口、左边留口、右边留口），所以路径是个 S 形。展开 88 格。
 
 ![12x12 地图](task4/output/regular_12x12.png)
 

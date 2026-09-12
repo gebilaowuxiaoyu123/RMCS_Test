@@ -59,6 +59,15 @@ cv::Mat render(
         }
     }
 
+    // 格子够大时画上网格线，方便直接数格子
+    if (cell >= 12) {
+        const cv::Scalar grid_color(205, 205, 205);
+        for (int x = 0; x <= map.width(); ++x)
+            cv::line(image, cv::Point{x * cell, 0}, cv::Point{x * cell, image.rows}, grid_color, 1);
+        for (int y = 0; y <= map.height(); ++y)
+            cv::line(image, cv::Point{0, y * cell}, cv::Point{image.cols, y * cell}, grid_color, 1);
+    }
+
     if (!result.path.empty()) {
         std::vector<cv::Point> centers;
         centers.reserve(result.path.size());
@@ -114,17 +123,15 @@ std::vector<MapCase> build_maps() {
     std::vector<MapCase> maps;
 
     GridMap tiny(5, 5);
-    tiny.fill_border(1);
-    tiny.set_occupied(GridPoint{2, 2});
-    maps.push_back(MapCase{"tiny_5x5", std::move(tiny), GridPoint{1, 1}, GridPoint{3, 3}});
+    tiny.fill_rect(GridPoint{2, 1}, 1, 3);
+    maps.push_back(MapCase{"tiny_5x5", std::move(tiny), GridPoint{0, 0}, GridPoint{4, 4}});
 
     GridMap regular(12, 12);
-    regular.fill_border(1);
-    regular.fill_rect(GridPoint{1, 3}, 9, 1);
-    regular.fill_rect(GridPoint{2, 6}, 9, 1);
-    regular.fill_rect(GridPoint{1, 9}, 9, 1);
+    regular.fill_rect(GridPoint{0, 3}, 11, 1);
+    regular.fill_rect(GridPoint{1, 6}, 11, 1);
+    regular.fill_rect(GridPoint{0, 9}, 11, 1);
     maps.push_back(
-        MapCase{"regular_12x12", std::move(regular), GridPoint{1, 1}, GridPoint{10, 10}});
+        MapCase{"regular_12x12", std::move(regular), GridPoint{0, 0}, GridPoint{11, 11}});
 
     GridMap rooms(60, 40);
     rooms.fill_border(1);
