@@ -27,15 +27,12 @@ const cv::Scalar kPathColor(50, 40, 240);
 const cv::Scalar kStartColor(60, 180, 75);
 const cv::Scalar kGoalColor(230, 120, 60);
 
-const int kCellPixels = 8;
-
-void put_label(cv::Mat& image, const std::string& text, int row, double font_scale = 0.55) {
+void put_label(cv::Mat& image, const std::string& text, int row) {
     const cv::Point origin{8, 22 + row * 20};
     cv::putText(
-        image, text, origin, cv::FONT_HERSHEY_SIMPLEX, font_scale, cv::Scalar(0, 0, 0), 4,
-        cv::LINE_AA);
+        image, text, origin, cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 0), 4, cv::LINE_AA);
     cv::putText(
-        image, text, origin, cv::FONT_HERSHEY_SIMPLEX, font_scale, cv::Scalar(255, 255, 255), 2,
+        image, text, origin, cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(255, 255, 255), 2,
         cv::LINE_AA);
 }
 
@@ -43,23 +40,22 @@ cv::Mat render(
     const GridMap& map, const SearchResult& result, GridPoint start, GridPoint goal,
     const std::vector<std::string>& labels) {
 
-    cv::Mat image(
-        map.height() * kCellPixels, map.width() * kCellPixels, CV_8UC3, kFreeColor);
+    const int cell = std::max(6, 480 / map.width());
+    cv::Mat image(map.height() * cell, map.width() * cell, CV_8UC3, kFreeColor);
 
     for (int y = 0; y < map.height(); ++y) {
         for (int x = 0; x < map.width(); ++x) {
             const GridPoint point{x, y};
             cv::Scalar color = kFreeColor;
-            const auto cell = result.state[map.index(point)];
+            const auto cell_state = result.state[map.index(point)];
             if (!map.is_free(point))
                 color = kOccupiedColor;
-            else if (cell == 2)
+            else if (cell_state == 2)
                 color = kClosedColor;
-            else if (cell == 1)
+            else if (cell_state == 1)
                 color = kOpenColor;
             cv::rectangle(
-                image, cv::Rect(x * kCellPixels, y * kCellPixels, kCellPixels, kCellPixels), color,
-                cv::FILLED);
+                image, cv::Rect(x * cell, y * cell, cell, cell), color, cv::FILLED);
         }
     }
 
@@ -67,15 +63,12 @@ cv::Mat render(
         std::vector<cv::Point> centers;
         centers.reserve(result.path.size());
         for (const auto& point : result.path)
-            centers.emplace_back(
-                point.x * kCellPixels + kCellPixels / 2, point.y * kCellPixels + kCellPixels / 2);
+            centers.emplace_back(point.x * cell + cell / 2, point.y * cell + cell / 2);
         cv::polylines(image, centers, false, kPathColor, 2, cv::LINE_AA);
     }
 
     const auto marker = [&](GridPoint point, const cv::Scalar& color) {
-        cv::rectangle(
-            image, cv::Rect(point.x * kCellPixels, point.y * kCellPixels, kCellPixels, kCellPixels),
-            color, cv::FILLED);
+        cv::rectangle(image, cv::Rect(point.x * cell, point.y * cell, cell, cell), color, cv::FILLED);
     };
     marker(start, kStartColor);
     marker(goal, kGoalColor);
@@ -87,15 +80,24 @@ cv::Mat render(
 }
 
 cv::Mat stack_row(const std::vector<cv::Mat>& panels, int padding = 12) {
+    const int height = std::max_element(
+                           panels.begin(), panels.end(),
+                           [](const cv::Mat& a, const cv::Mat& b) { return a.rows < b.rows; })
+                           ->rows;
     cv::Mat row;
     for (std::size_t i = 0; i < panels.size(); ++i) {
+        cv::Mat panel = panels[i];
+        if (panel.rows != height)
+            cv::copyMakeBorder(
+                panel, panel, 0, height - panel.rows, 0, 0, cv::BORDER_CONSTANT,
+                cv::Scalar(235, 235, 235));
         if (i == 0) {
-            row = panels[i].clone();
+            row = panel.clone();
             continue;
         }
         cv::Mat padded;
         cv::copyMakeBorder(
-            panels[i], padded, 0, 0, padding, 0, cv::BORDER_CONSTANT, cv::Scalar(235, 235, 235));
+            panel, padded, 0, 0, padding, 0, cv::BORDER_CONSTANT, cv::Scalar(235, 235, 235));
         cv::hconcat(row, padded, row);
     }
     return row;
@@ -110,6 +112,19 @@ struct MapCase {
 
 std::vector<MapCase> build_maps() {
     std::vector<MapCase> maps;
+
+    GridMap tiny(5, 5);
+    tiny.fill_border(1);
+    tiny.set_occupied(GridPoint{2, 2});
+    maps.push_back(MapCase{"tiny_5x5", std::move(tiny), GridPoint{1, 1}, GridPoint{3, 3}});
+
+    GridMap regular(12, 12);
+    regular.fill_border(1);
+    regular.fill_rect(GridPoint{1, 3}, 9, 1);
+    regular.fill_rect(GridPoint{2, 6}, 9, 1);
+    regular.fill_rect(GridPoint{1, 9}, 9, 1);
+    maps.push_back(
+        MapCase{"regular_12x12", std::move(regular), GridPoint{1, 1}, GridPoint{10, 10}});
 
     GridMap rooms(60, 40);
     rooms.fill_border(1);
@@ -157,12 +172,12 @@ int main() {
 
         cv::Mat view = render(
             item.map, result, item.start, item.goal,
-            {"A* 8-neighbor (diagonal allowed)", stats_text(result)});
+            {"A* 8-neighbor", stats_text(result)});
         cv::imwrite(output_dir + item.name + ".png", view);
     }
 
     const std::vector<MapCase> maps = build_maps();
-    const MapCase& rooms = maps.front();
+    const MapCase& rooms = maps[2];
 
     std::vector<cv::Mat> panels;
     for (const bool allow_diagonal : {false, true}) {
@@ -173,12 +188,11 @@ int main() {
         const std::string name = allow_diagonal ? "rooms / 8-neighbor" : "rooms / 4-neighbor";
         report(name, result);
 
-        panels.push_back(render(
-            rooms.map, result, rooms.start, rooms.goal,
-            {name, stats_text(result)}));
+        panels.push_back(render(rooms.map, result, rooms.start, rooms.goal, {name, stats_text(result)}));
     }
     cv::imwrite(output_dir + "neighbors.png", stack_row(panels));
 
-    std::cout << "结果图已写入 " << output_dir << "{rooms,random,neighbors}.png\n";
+    std::cout << "结果图已写入 " << output_dir
+              << "{tiny_5x5,regular_12x12,rooms,random,neighbors}.png\n";
     return 0;
 }

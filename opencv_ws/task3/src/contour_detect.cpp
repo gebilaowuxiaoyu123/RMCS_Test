@@ -6,117 +6,34 @@
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 
-namespace {
-
-cv::Mat to_bgr(const cv::Mat& image) {
-    cv::Mat out;
-    if (image.channels() == 1)
-        cv::cvtColor(image, out, cv::COLOR_GRAY2BGR);
-    else
-        out = image.clone();
-    return out;
-}
-
-void put_label(cv::Mat& image, const std::string& text) {
-    const cv::Point origin{12, 34};
-    cv::putText(
-        image, text, origin, cv::FONT_HERSHEY_SIMPLEX, 0.9, cv::Scalar(0, 0, 0), 5, cv::LINE_AA);
-    cv::putText(
-        image, text, origin, cv::FONT_HERSHEY_SIMPLEX, 0.9, cv::Scalar(255, 255, 255), 2,
-        cv::LINE_AA);
-}
-
-cv::Mat draw_contours_on(cv::Mat canvas, const std::vector<std::vector<cv::Point>>& contours) {
-    canvas = canvas.clone();
-    for (std::size_t i = 0; i < contours.size(); ++i) {
-        const int blue = static_cast<int>((i * 37 + 60) % 256);
-        const int green = static_cast<int>((i * 91 + 140) % 256);
-        const int red = static_cast<int>((i * 53 + 220) % 256);
-        cv::drawContours(
-            canvas, contours, static_cast<int>(i), cv::Scalar(blue, green, red), 2, cv::LINE_AA);
-    }
-    return canvas;
-}
-
-cv::Mat stack_panel(
-    const cv::Mat& top_left, const cv::Mat& top_right, const cv::Mat& bottom_left,
-    const cv::Mat& bottom_right) {
-    cv::Mat top, bottom, panel;
-    cv::hconcat(top_left, top_right, top);
-    cv::hconcat(bottom_left, bottom_right, bottom);
-    cv::vconcat(top, bottom, panel);
-    return panel;
-}
-
-} // namespace
-
 int main(int argc, char** argv) {
-    const std::string input_path = argc > 1 ? argv[1] : "images/fruits.jpg";
-    const std::string output_prefix = argc > 2 ? argv[2] : "output/result";
-    const double min_length = argc > 3 ? std::atof(argv[3]) : 40.0;
-    double canny_low = argc > 4 ? std::atof(argv[4]) : 60.0;
-    double canny_high = argc > 5 ? std::atof(argv[5]) : 180.0;
-    int blur_size = argc > 6 ? std::atoi(argv[6]) : 5;
-    if (blur_size < 1)
-        blur_size = 1;
-    if (blur_size % 2 == 0)
-        ++blur_size;
-    if (canny_low > canny_high)
-        std::swap(canny_low, canny_high);
+    const std::string input = argc > 1 ? argv[1] : "images/official_input.jpg";
+    const std::string output = argc > 2 ? argv[2] : "output/contours.png";
+    const double canny_low = argc > 3 ? std::atof(argv[3]) : 35.0;
+    const double canny_high = argc > 4 ? std::atof(argv[4]) : 105.0;
 
-    const cv::Mat image = cv::imread(input_path, cv::IMREAD_COLOR);
-    if (image.empty()) {
-        std::cerr << "无法读取图片: " << input_path << '\n';
+    const cv::Mat color = cv::imread(input, cv::IMREAD_COLOR);
+    if (color.empty()) {
+        std::cerr << "读不到图片: " << input << '\n';
         return 1;
     }
 
     cv::Mat gray;
-    cv::cvtColor(image, gray, cv::COLOR_BGR2GRAY);
+    cv::cvtColor(color, gray, cv::COLOR_BGR2GRAY);
 
-    cv::Mat blurred;
-    cv::GaussianBlur(gray, blurred, cv::Size(blur_size, blur_size), 1.5);
+    cv::GaussianBlur(gray, gray, cv::Size(5, 5), 1.5);
 
     cv::Mat edges;
-    cv::Canny(blurred, edges, canny_low, canny_high);
-    cv::morphologyEx(
-        edges, edges, cv::MORPH_CLOSE, cv::getStructuringElement(cv::MORPH_RECT, {3, 3}));
+    cv::Canny(gray, edges, canny_low, canny_high);
 
     std::vector<std::vector<cv::Point>> contours;
-    std::vector<cv::Vec4i> hierarchy;
-    cv::findContours(edges, contours, hierarchy, cv::RETR_LIST, cv::CHAIN_APPROX_NONE);
+    cv::findContours(edges, contours, cv::RETR_LIST, cv::CHAIN_APPROX_SIMPLE);
 
-    std::vector<std::vector<cv::Point>> kept;
-    for (const auto& contour : contours) {
-        if (cv::arcLength(contour, false) >= min_length)
-            kept.push_back(contour);
-    }
+    cv::Mat canvas(color.size(), CV_8UC3, cv::Scalar(255, 255, 255));
+    cv::drawContours(canvas, contours, -1, cv::Scalar(0, 0, 0), 1);
 
-    cv::Mat contour_view =
-        draw_contours_on(cv::Mat(image.size(), CV_8UC3, cv::Scalar(255, 255, 255)), kept);
-    cv::Mat contour_overlay = draw_contours_on(image, kept);
+    cv::imwrite(output, canvas);
 
-    cv::Mat original_view = image.clone();
-    cv::Mat gray_view = to_bgr(gray);
-    cv::Mat edge_view = to_bgr(edges);
-
-    put_label(original_view, "original");
-    put_label(gray_view, "gray");
-    put_label(edge_view, "canny edges");
-    put_label(contour_view, "contours");
-
-    cv::imwrite(output_prefix + "_gray.png", gray);
-    cv::imwrite(output_prefix + "_edges.png", edges);
-    cv::imwrite(output_prefix + "_contours.png", contour_view);
-    cv::imwrite(output_prefix + "_overlay.png", contour_overlay);
-    cv::imwrite(
-        output_prefix + "_compare.png",
-        stack_panel(original_view, gray_view, edge_view, contour_view));
-
-    std::cout << "图片: " << input_path << " (" << image.cols << "x" << image.rows << ")\n";
-    std::cout << "参数: 模糊核=" << blur_size << " Canny低阀=" << canny_low
-              << " 高阀=" << canny_high << " 最小周长=" << min_length << "\n";
-    std::cout << "检出轮廓: " << contours.size() << " 条, 周长 > " << min_length << " 的保留 "
-              << kept.size() << " 条\n";
-    std::cout << "结果已写入: " << output_prefix << "_{gray,edges,contours,overlay,compare}.png\n";
+    std::cout << input << " -> " << output << "  轮廓 " << contours.size() << " 条\n";
     return 0;
 }
