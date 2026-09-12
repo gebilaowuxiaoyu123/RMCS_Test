@@ -21,14 +21,6 @@ const int OPEN_LEVEL = 168;
 const int GRID_LEVEL = 238;
 const int PATH_LEVEL = 70;
 
-void put_text(cv::Mat& image, const std::string& text, int row) {
-    const cv::Point origin{8, 22 + row * 20};
-    cv::putText(
-        image, text, origin, cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(FREE_LEVEL), 4, cv::LINE_AA);
-    cv::putText(
-        image, text, origin, cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(WALL_LEVEL), 2, cv::LINE_AA);
-}
-
 void put_mark(cv::Mat& image, Point point, int cell, const std::string& letter) {
     cv::rectangle(
         image, cv::Rect(point.x * cell, point.y * cell, cell, cell), cv::Scalar(FREE_LEVEL),
@@ -51,8 +43,7 @@ std::string info_text(const Result& result) {
     return text.str();
 }
 
-cv::Mat draw(
-    const Map& map, const Result& result, Point start, Point goal, const std::string& title) {
+cv::Mat draw(const Map& map, const Result& result, Point start, Point goal) {
 
     const int cell = std::max(14, 480 / map.width);
     cv::Mat image(map.height * cell, map.width * cell, CV_8UC1, cv::Scalar(FREE_LEVEL));
@@ -72,15 +63,16 @@ cv::Mat draw(
         }
     }
 
-    for (int x = 0; x <= map.width; ++x)
-        cv::line(
-            image, cv::Point{x * cell, 0}, cv::Point{x * cell, image.rows},
-            cv::Scalar(GRID_LEVEL), 1);
-    for (int y = 0; y <= map.height; ++y)
-        cv::line(
-            image, cv::Point{0, y * cell}, cv::Point{image.cols, y * cell}, cv::Scalar(GRID_LEVEL),
-            1);
-
+    if (cell >= 24) {
+        for (int x = 0; x <= map.width; ++x)
+            cv::line(
+                image, cv::Point{x * cell, 0}, cv::Point{x * cell, image.rows},
+                cv::Scalar(GRID_LEVEL), 1);
+        for (int y = 0; y <= map.height; ++y)
+            cv::line(
+                image, cv::Point{0, y * cell}, cv::Point{image.cols, y * cell},
+                cv::Scalar(GRID_LEVEL), 1);
+    }
     if (!result.path.empty()) {
         std::vector<cv::Point> centers;
         for (const auto& point : result.path)
@@ -91,11 +83,7 @@ cv::Mat draw(
     put_mark(image, start, cell, "S");
     put_mark(image, goal, cell, "G");
 
-    cv::Mat canvas(image.rows + 46, image.cols, CV_8UC1, cv::Scalar(FREE_LEVEL));
-    image.copyTo(canvas(cv::Rect(0, 46, image.cols, image.rows)));
-    put_text(canvas, title, 0);
-    put_text(canvas, info_text(result), 1);
-    return canvas;
+    return image;
 }
 
 cv::Mat side_by_side(const std::vector<cv::Mat>& images) {
@@ -169,8 +157,7 @@ int main() {
         const Result result = find_path(item.map, item.start, item.goal, true);
         print_info(item.name, result);
         cv::imwrite(
-            outDir + item.name + ".png",
-            draw(item.map, result, item.start, item.goal, "A* 8-neighbor"));
+            outDir + item.name + ".png", draw(item.map, result, item.start, item.goal));
     }
 
     const std::vector<Case> maps = make_maps();
@@ -181,7 +168,7 @@ int main() {
         const Result result = find_path(rooms.map, rooms.start, rooms.goal, allowDiagonal);
         const std::string title = allowDiagonal ? "rooms / 8-neighbor" : "rooms / 4-neighbor";
         print_info(title, result);
-        images.push_back(draw(rooms.map, result, rooms.start, rooms.goal, title));
+        images.push_back(draw(rooms.map, result, rooms.start, rooms.goal));
     }
     cv::imwrite(outDir + "neighbors.png", side_by_side(images));
 

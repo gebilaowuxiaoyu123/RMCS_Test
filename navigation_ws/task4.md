@@ -19,13 +19,14 @@ random.png          60×40 随机障碍地图
 neighbors.png       同一张图 4 邻域 vs 8 邻域对比
 ```
 
-代码就 3 个文件，各管各的：
+代码就 3 个文件，都放在 `src/` 下，各管各的：
 
 ```
 task4/
-├── include/map.hpp      地图：图多大、哪格能走、怎么造墙
-├── include/astar.hpp    算法：怎么找路（接口和实现都在这一个文件里）
-└── src/main.cpp         主程序：造地图 + 调算法 + 画图
+└── src/
+    ├── map.hpp      地图：图多大、哪格能走、怎么造墙
+    ├── astar.hpp    算法：怎么找路（接口和实现都在这一个文件里）
+    └── main.cpp     主程序：造地图 + 调算法 + 画图
 ```
 
 要改地图就改 `src/main.cpp` 的 `make_maps()`：
@@ -37,11 +38,11 @@ maps.push_back(Case{"tiny_5x5", std::move(tiny), Point{0, 0}, Point{4, 4}});
 //                 ↑名字                        ↑起点      ↑终点
 ```
 
-**图是黑白的**（灰度，没有彩色）：白=空地、黑=障碍、浅灰=搜过的格子、中灰=待办清单、深灰=最后那条路径；起点写个 `S`，终点写个 `G`，标题和结果数字放在图上方单独一条白边上，不压着地图。
+**图是黑白的**（灰度，没有彩色）：白=空地、黑=障碍、浅灰=搜过的格子、中灰=待办清单、深灰=最后那条路径；起点写个 `S`，终点写个 `G`。图上**不放任何标题和数字**，看着干净；跑的数值只在终端里打印。小地图（5×5、12×12）会画浅灰网格线，方便数格子；大地图不画。
 
 ## 二、代码
 
-### include/map.hpp
+### src/map.hpp
 
 ```cpp
 #pragma once
@@ -121,7 +122,7 @@ public:
 };
 ```
 
-### include/astar.hpp
+### src/astar.hpp
 
 ```cpp
 #pragma once
@@ -253,7 +254,16 @@ inline Result find_path(const Map& map, Point start, Point goal, bool allowDiago
 }
 ```
 
-`src/main.cpp` 就干三件事：造地图、调 `find_path`、把结果画成 PNG。画图每格用 `cv::rectangle` 填一种灰度，路径用 `cv::polylines` 连成折线，起点终点格子填白后写上 `S` / `G`，最后把标题和数字写在上方那条 46 像素的白边上。
+`src/main.cpp` 就干三件事：造地图、调 `find_path`、把结果画成 PNG。画图就是每格用 `cv::rectangle` 填一种灰度，路径用 `cv::polylines` 连成折线，起点终点格子填白、写上 `S` / `G`，别的一律不画。数字改在终端里看：
+
+```bash
+[tiny_5x5] 找到路径  expanded=20  points=8  cost=7.4
+[regular_12x12] 找到路径  expanded=88  points=41  cost=41.7
+[rooms] 找到路径  expanded=527  points=60  cost=71.8
+[random] 找到路径  expanded=612  points=69  cost=77.9
+[rooms / 4-neighbor] 找到路径  expanded=701  points=91  cost=90.0
+[rooms / 8-neighbor] 找到路径  expanded=527  points=60  cost=71.8
+```
 
 ## 三、结果
 

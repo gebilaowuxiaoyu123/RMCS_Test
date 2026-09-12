@@ -14,5 +14,5 @@ add_executable(task4_astar
     src/main.cpp
 )
 
-target_include_directories(task4_astar PRIVATE include ${OpenCV_INCLUDE_DIRS})
+target_include_directories(task4_astar PRIVATE src ${OpenCV_INCLUDE_DIRS})
 target_link_libraries(task4_astar PRIVATE ${OpenCV_LIBS})
