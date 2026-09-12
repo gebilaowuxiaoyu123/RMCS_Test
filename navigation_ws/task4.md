@@ -38,7 +38,7 @@ maps.push_back(Case{"tiny_5x5", std::move(tiny), Point{0, 0}, Point{4, 4}});
 //                 ↑名字                        ↑起点      ↑终点
 ```
 
-**图是黑白的**（灰度，没有彩色）：白=空地、黑=障碍、浅灰=搜过的格子、中灰=待办清单、深灰=最后那条路径；起点写个 `S`，终点写个 `G`。图上**不放任何标题和数字**，看着干净；跑的数值只在终端里打印。小地图（5×5、12×12）会画浅灰网格线，方便数格子；大地图不画。
+**图的样式是照那份资料里的格子图来的**：没搜过的空地浅灰、展开过的格子（CloseList）刷淡黄、还在待办清单里的（OpenList）刷稍深一点的黄、障碍近黑，最后那条路径**一格一格填成绿色**（不是画细线）；每格都有一道浅灰边框，起点终点格子填白写个 `S` / `G`。**不画旗子和叉**，图上也不放标题和数字，看着干净；跑的数值只在终端里打印。
 
 ## 二、代码
 
@@ -285,7 +285,7 @@ inline Result search(const Map& map, Point start, Point goal, bool allowDiagonal
 }
 ```
 
-`src/main.cpp` 就干三件事：造地图、调 `search`、把结果画成 PNG。画图就是每格用 `cv::rectangle` 填一种灰度（看 `colored`：2 画浅灰、1 画中灰），路径用 `cv::polylines` 连成折线，起点终点格子填白、写上 `S` / `G`，别的一律不画。数字改在终端里看：
+`src/main.cpp` 就干三件事：造地图、调 `search`、把结果画成 PNG。画图就是每格先用 `cv::rectangle` 填个底色（看 `colored`：2 淡黄、1 稍深的黄、墙近黑），再把路径上的格子整格填绿，然后补一遍网格线，最后起点终点格子填白、写上 `S` / `G`。数字在终端里看：
 
 ```bash
 [tiny_5x5] 找到路径  expanded=20  points=8  g=7.4
@@ -315,7 +315,7 @@ inline Result search(const Map& map, Point start, Point goal, bool allowDiagonal
 
 ![12x12 地图](task4/output/regular_12x12.png)
 
-**60×40 房间地图**：墙把地图切成几个房间，得绕门洞走。浅灰是展开过的格子（CloseList），中灰是还在待办清单里、贴着障碍的那层边（OpenList）。
+**60×40 房间地图**：墙把地图切成几个房间，得绕门洞走。淡黄是展开过的格子（CloseList），稍深的黄是还在待办清单里、贴着障碍的那层边（OpenList）。
 
 ![rooms 地图](task4/output/rooms.png)
 

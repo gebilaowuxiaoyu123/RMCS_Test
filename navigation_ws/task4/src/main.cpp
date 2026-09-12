@@ -14,26 +14,28 @@
 
 namespace {
 
-const int FREE_LEVEL = 255;
-const int WALL_LEVEL = 0;
-const int VISITED_LEVEL = 214;
-const int OPEN_LEVEL = 168;
-const int GRID_LEVEL = 238;
-const int PATH_LEVEL = 70;
+const cv::Scalar FREE_COLOR(240, 240, 240);
+const cv::Scalar VISITED_COLOR(205, 246, 255);
+const cv::Scalar OPEN_COLOR(152, 224, 255);
+const cv::Scalar WALL_COLOR(55, 55, 55);
+const cv::Scalar PATH_COLOR(90, 175, 75);
+const cv::Scalar GRID_COLOR(205, 205, 205);
+const cv::Scalar MARK_COLOR(255, 255, 255);
+const cv::Scalar TEXT_COLOR(0, 0, 0);
 
 void put_mark(cv::Mat& image, Point point, int cell, const std::string& letter) {
     cv::rectangle(
-        image, cv::Rect(point.x * cell, point.y * cell, cell, cell), cv::Scalar(FREE_LEVEL),
-        cv::FILLED);
+        image, cv::Rect(point.x * cell, point.y * cell, cell, cell), MARK_COLOR, cv::FILLED);
 
     const double scale = cell / 40.0;
     const int thickness = cell >= 30 ? 2 : 1;
     int baseline = 0;
-    const cv::Size size = cv::getTextSize(letter, cv::FONT_HERSHEY_SIMPLEX, scale, thickness, &baseline);
+    const cv::Size size =
+        cv::getTextSize(letter, cv::FONT_HERSHEY_SIMPLEX, scale, thickness, &baseline);
     const cv::Point center{point.x * cell + cell / 2, point.y * cell + cell / 2};
     cv::putText(
         image, letter, cv::Point{center.x - size.width / 2, center.y + size.height / 2},
-        cv::FONT_HERSHEY_SIMPLEX, scale, cv::Scalar(WALL_LEVEL), thickness, cv::LINE_AA);
+        cv::FONT_HERSHEY_SIMPLEX, scale, TEXT_COLOR, thickness, cv::LINE_AA);
 }
 
 std::string info_text(const Result& result) {
@@ -46,39 +48,31 @@ std::string info_text(const Result& result) {
 cv::Mat draw(const Map& map, const Result& result, Point start, Point goal) {
 
     const int cell = std::max(14, 480 / map.width);
-    cv::Mat image(map.height * cell, map.width * cell, CV_8UC1, cv::Scalar(FREE_LEVEL));
+    cv::Mat image(map.height * cell, map.width * cell, CV_8UC3, FREE_COLOR);
 
     for (int y = 0; y < map.height; ++y) {
         for (int x = 0; x < map.width; ++x) {
-            int level = FREE_LEVEL;
+            cv::Scalar color = FREE_COLOR;
             const auto state = result.colored[map.index(x, y)];
             if (!map.free(x, y))
-                level = WALL_LEVEL;
+                color = WALL_COLOR;
             else if (state == 2)
-                level = VISITED_LEVEL;
+                color = VISITED_COLOR;
             else if (state == 1)
-                level = OPEN_LEVEL;
-            cv::rectangle(
-                image, cv::Rect(x * cell, y * cell, cell, cell), cv::Scalar(level), cv::FILLED);
+                color = OPEN_COLOR;
+            cv::rectangle(image, cv::Rect(x * cell, y * cell, cell, cell), color, cv::FILLED);
         }
     }
 
-    if (cell >= 24) {
-        for (int x = 0; x <= map.width; ++x)
-            cv::line(
-                image, cv::Point{x * cell, 0}, cv::Point{x * cell, image.rows},
-                cv::Scalar(GRID_LEVEL), 1);
-        for (int y = 0; y <= map.height; ++y)
-            cv::line(
-                image, cv::Point{0, y * cell}, cv::Point{image.cols, y * cell},
-                cv::Scalar(GRID_LEVEL), 1);
-    }
-    if (!result.path.empty()) {
-        std::vector<cv::Point> centers;
-        for (const auto& point : result.path)
-            centers.emplace_back(point.x * cell + cell / 2, point.y * cell + cell / 2);
-        cv::polylines(image, centers, false, cv::Scalar(PATH_LEVEL), 2, cv::LINE_AA);
-    }
+    for (const auto& point : result.path)
+        cv::rectangle(
+            image, cv::Rect(point.x * cell, point.y * cell, cell, cell), PATH_COLOR,
+            cv::FILLED);
+
+    for (int x = 0; x <= map.width; ++x)
+        cv::line(image, cv::Point{x * cell, 0}, cv::Point{x * cell, image.rows}, GRID_COLOR, 1);
+    for (int y = 0; y <= map.height; ++y)
+        cv::line(image, cv::Point{0, y * cell}, cv::Point{image.cols, y * cell}, GRID_COLOR, 1);
 
     put_mark(image, start, cell, "S");
     put_mark(image, goal, cell, "G");
@@ -95,7 +89,7 @@ cv::Mat side_by_side(const std::vector<cv::Mat>& images) {
         }
         cv::Mat padded;
         cv::copyMakeBorder(
-            images[i], padded, 0, 0, 12, 0, cv::BORDER_CONSTANT, cv::Scalar(GRID_LEVEL));
+            images[i], padded, 0, 0, 12, 0, cv::BORDER_CONSTANT, GRID_COLOR);
         cv::hconcat(row, padded, row);
     }
     return row;
