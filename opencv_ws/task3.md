@@ -6,7 +6,14 @@
 
 我自己就没往复杂了搞，用最基础的五个函数：
 
-彩色图 → 灰度 → 高斯模糊 → Canny → findContours → drawContours
+```mermaid
+flowchart LR
+    A["彩色图"] -->|cvtColor| B["灰度图"]
+    B -->|GaussianBlur| C["去噪后的图"]
+    C -->|Canny| D["边缘图<br/>白的边、黑的无边"]
+    D -->|findContours| E["轮廓<br/>一条条点坐标"]
+    E -->|drawContours| F["白底黑线<br/>输出结果"]
+```
 
 这个顺序是有讲究的。Canny 只认亮度变化，所以得先转灰度；模糊那一步也不能省——照片的噪点在 Canny 眼里也算边缘，不先抹掉的话出来就是满屏碎线，根本没法看。
 
