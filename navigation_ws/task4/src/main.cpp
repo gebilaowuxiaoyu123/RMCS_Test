@@ -39,7 +39,7 @@ void put_mark(cv::Mat& image, Point point, int cell, const std::string& letter) 
 std::string info_text(const Result& result) {
     std::ostringstream text;
     text << "expanded=" << result.expanded << "  points=" << result.path.size() << std::fixed
-         << std::setprecision(1) << "  cost=" << result.cost;
+         << std::setprecision(1) << "  g=" << result.g;
     return text.str();
 }
 
@@ -51,7 +51,7 @@ cv::Mat draw(const Map& map, const Result& result, Point start, Point goal) {
     for (int y = 0; y < map.height; ++y) {
         for (int x = 0; x < map.width; ++x) {
             int level = FREE_LEVEL;
-            const auto state = result.visited[map.index(x, y)];
+            const auto state = result.colored[map.index(x, y)];
             if (!map.free(x, y))
                 level = WALL_LEVEL;
             else if (state == 2)
@@ -154,7 +154,7 @@ int main() {
     const std::string outDir = "output/";
 
     for (auto& item : make_maps()) {
-        const Result result = find_path(item.map, item.start, item.goal, true);
+        const Result result = search(item.map, item.start, item.goal, true);
         print_info(item.name, result);
         cv::imwrite(
             outDir + item.name + ".png", draw(item.map, result, item.start, item.goal));
@@ -165,9 +165,9 @@ int main() {
 
     std::vector<cv::Mat> images;
     for (const bool allowDiagonal : {false, true}) {
-        const Result result = find_path(rooms.map, rooms.start, rooms.goal, allowDiagonal);
-        const std::string title = allowDiagonal ? "rooms / 8-neighbor" : "rooms / 4-neighbor";
-        print_info(title, result);
+        const Result result = search(rooms.map, rooms.start, rooms.goal, allowDiagonal);
+        const std::string label = allowDiagonal ? "rooms / 8-neighbor" : "rooms / 4-neighbor";
+        print_info(label, result);
         images.push_back(draw(rooms.map, result, rooms.start, rooms.goal));
     }
     cv::imwrite(outDir + "neighbors.png", side_by_side(images));

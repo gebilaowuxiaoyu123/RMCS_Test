@@ -8,97 +8,112 @@
 
 #include "map.hpp"
 
+inline constexpr double INF = 1e18;
+inline constexpr double ROOT2 = 1.4142135623730951;
+
+struct Node {
+    int x = 0;
+    int y = 0;
+    double g = 0.0;
+    double h = 0.0;
+
+    double f() const { return g + h; }
+
+    bool operator>(const Node& other) const { return f() > other.f(); }
+};
+
 struct Result {
     bool found = false;
     int expanded = 0;
-    double cost = 0.0;
+    double g = 0.0;
     std::vector<Point> path;
-    std::vector<unsigned char> visited;
+    std::vector<unsigned char> colored;
 };
 
-inline Result find_path(const Map& map, Point start, Point goal, bool allowDiagonal) {
-    const double INF = 1e18;
-    const double ROOT2 = 1.4142135623730951;
+inline double calc_g(const Node& node, const Node& parent) {
+    return (node.x != parent.x && node.y != parent.y) ? ROOT2 : 1.0;
+}
 
-    struct Node {
-        double f = 0.0;
-        double g = 0.0;
-        int x = 0;
-        int y = 0;
+inline double calc_h(const Node& node, Point goal, bool allowDiagonal) {
+    const double dx = std::abs(node.x - goal.x);
+    const double dy = std::abs(node.y - goal.y);
 
-        bool operator>(const Node& other) const { return f > other.f; }
-    };
+    if (!allowDiagonal)
+        return dx + dy;
 
-    const auto heuristic = [goal, allowDiagonal, ROOT2](int x, int y) {
-        const double distX = std::abs(x - goal.x);
-        const double distY = std::abs(y - goal.y);
-        if (!allowDiagonal)
-            return distX + distY;
-        return std::max(distX, distY) + (ROOT2 - 1.0) * std::min(distX, distY);
-    };
+    return std::max(dx, dy) + (ROOT2 - 1.0) * std::min(dx, dy);
+}
 
+inline Result search(const Map& map, Point start, Point goal, bool allowDiagonal) {
     Result result;
-    result.visited.assign(map.cells.size(), 0);
+    result.colored.assign(map.cells.size(), 0);
 
-    std::vector<double> g(map.cells.size(), INF);
-    std::vector<int> from(map.cells.size(), -1);
-    std::priority_queue<Node, std::vector<Node>, std::greater<Node>> open;
+    std::vector<double> gBest(map.cells.size(), INF);
+    std::vector<int> parent(map.cells.size(), -1);
+
+    std::priority_queue<Node, std::vector<Node>, std::greater<Node>> openList;
+
+    Node startNode{start.x, start.y};
+    startNode.h = calc_h(startNode, goal, allowDiagonal);
 
     const int startIndex = map.index(start.x, start.y);
-    g[startIndex] = 0.0;
-    open.push(Node{heuristic(start.x, start.y), 0.0, start.x, start.y});
-    result.visited[startIndex] = 1;
+    gBest[startIndex] = 0.0;
+    result.colored[startIndex] = 1;
+    openList.push(startNode);
 
-    const int dirX[8] = {1, -1, 0, 0, 1, 1, -1, -1};
-    const int dirY[8] = {0, 0, 1, -1, 1, -1, 1, -1};
+    const int dx[8] = {1, -1, 0, 0, 1, 1, -1, -1};
+    const int dy[8] = {0, 0, 1, -1, 1, -1, 1, -1};
 
-    while (!open.empty()) {
-        const Node now = open.top();
-        open.pop();
+    while (!openList.empty()) {
+        const Node now = openList.top();
+        openList.pop();
 
         const int nowIndex = map.index(now.x, now.y);
-        if (now.g > g[nowIndex])
+        if (result.colored[nowIndex] == 2)
             continue;
 
-        result.visited[nowIndex] = 2;
+        result.colored[nowIndex] = 2;
         ++result.expanded;
 
         if (now.x == goal.x && now.y == goal.y) {
             result.found = true;
+            result.g = now.g;
             break;
         }
 
         const int count = allowDiagonal ? 8 : 4;
         for (int i = 0; i < count; ++i) {
-            const int nextX = now.x + dirX[i];
-            const int nextY = now.y + dirY[i];
+            const int nextX = now.x + dx[i];
+            const int nextY = now.y + dy[i];
             if (!map.free(nextX, nextY))
                 continue;
 
-            const bool diagonal = dirX[i] != 0 && dirY[i] != 0;
-            if (diagonal && (!map.free(now.x + dirX[i], now.y) || !map.free(now.x, now.y + dirY[i])))
-                continue;
-
-            const double step = now.g + (diagonal ? ROOT2 : 1.0);
             const int nextIndex = map.index(nextX, nextY);
-            if (step >= g[nextIndex])
+            if (result.colored[nextIndex] == 2)
                 continue;
 
-            g[nextIndex] = step;
-            from[nextIndex] = nowIndex;
-            result.visited[nextIndex] = 1;
-            open.push(Node{step + heuristic(nextX, nextY), step, nextX, nextY});
+            const bool diagonal = dx[i] != 0 && dy[i] != 0;
+            if (diagonal && (!map.free(now.x + dx[i], now.y) || !map.free(now.x, now.y + dy[i])))
+                continue;
+
+            Node child{nextX, nextY};
+            child.g = now.g + calc_g(child, now);
+            if (child.g >= gBest[nextIndex])
+                continue;
+
+            child.h = calc_h(child, goal, allowDiagonal);
+            gBest[nextIndex] = child.g;
+            parent[nextIndex] = nowIndex;
+            result.colored[nextIndex] = 1;
+            openList.push(child);
         }
     }
 
     if (result.found) {
-        const int goalIndex = map.index(goal.x, goal.y);
-        result.cost = g[goalIndex];
-
-        int index = goalIndex;
+        int index = map.index(goal.x, goal.y);
         while (index != -1) {
             result.path.push_back(Point{index % map.width, index / map.width});
-            index = from[index];
+            index = parent[index];
         }
         std::reverse(result.path.begin(), result.path.end());
     }

@@ -42,6 +42,21 @@ maps.push_back(Case{"tiny_5x5", std::move(tiny), Point{0, 0}, Point{4, 4}});
 
 ## 二、代码
 
+名字我是照着那份 A\* 资料（h(n)、g(n)、f(n)、OpenList、CloseList、Parent 那套）起的，看代码的时候能直接对上：
+
+| 资料里的写法 | 代码里的名字 |
+|---|---|
+| `Node(x, y, Parent, g, h)` | `Node`（x / y / g / h）+ `parent[]` |
+| h(n)、CalcDeltaHValue | `calc_h()`、`node.h` |
+| dg(n)、CalcDeltaGValue | `calc_g()` |
+| g(n) | `node.g`、`gBest[]`（每格已知最好的 g） |
+| f(n) = h(n) + g(n) | `Node::f()` |
+| OpenList（优先队列） | `openList` |
+| CloseList、Colored 数组 | `colored[]`（0 没碰过 / 1 在 OpenList / 2 在 CloseList） |
+| Parent | `parent[]` |
+| Hash 函数 `x * Size.Y + y` | `Map::index()` |
+| `Search(start, end)` | `search()` |
+
 ### src/map.hpp
 
 ```cpp
@@ -73,7 +88,7 @@ public:
     // 这一格能不能走（在界内 且 不是墙）
     bool free(int x, int y) const { return inside(x, y) && cells[index(x, y)] == 0; }
 
-    // 二维坐标转成一维下标
+    // 二维坐标转成一维下标，就是资料里 2.1.6 说的那个 hash：y * width + x
     int index(int x, int y) const { return y * width + x; }
 
     void set_wall(int x, int y) {
@@ -135,117 +150,133 @@ public:
 
 #include "map.hpp"
 
+const double INF = 1e18;                    // 代表"还没到过"
+const double ROOT2 = 1.4142135623730951;    // 斜走一步的代价 = 根号2
+
+// 资料里 Node 类：x, y, Parent, g, h。这里 x/y 是坐标，g 是 g(n)，h 是 h(n)
+// f(n) = h(n) + g(n)，出待办清单时按 f 从小到大排
+struct Node {
+    int x = 0;
+    int y = 0;
+    double g = 0.0;
+    double h = 0.0;
+
+    double f() const { return g + h; }
+
+    bool operator>(const Node& other) const { return f() > other.f(); }
+};
+
 // 一次寻路的结果
 struct Result {
     bool found = false;                    // 找到没有
-    int expanded = 0;                      // 展开了多少格，越小越快
-    double cost = 0.0;                     // 路径总代价
+    int expanded = 0;                      // 展开（拓展）了多少格，也就是 CloseList 的大小
+    double g = 0.0;                        // 终点的 g(n)，也就是路径总代价
     std::vector<Point> path;               // 起点→终点的路径
-    std::vector<unsigned char> visited;    // 每格状态：0 没碰过 / 1 在待办里 / 2 已展开
+    std::vector<unsigned char> colored;    // 就是资料里的 Colored 数组，见下面 1 / 2 的含义
 };
 
+// dg(n)：从 parent 走到 node 多花多少代价。直走 1，斜走根号2
+inline double calc_g(const Node& node, const Node& parent) {
+    return (node.x != parent.x && node.y != parent.y) ? ROOT2 : 1.0;
+}
+
+// h(n)：估 node 到终点还剩多远。这个值不能高估，否则 A* 就不保证最优了
+inline double calc_h(const Node& node, Point goal, bool allowDiagonal) {
+    const double dx = std::abs(node.x - goal.x);
+    const double dy = std::abs(node.y - goal.y);
+
+    // 只能上下左右走：曼哈顿距离，在这个走法下刚好不高估
+    if (!allowDiagonal)
+        return dx + dy;
+
+    // 能斜走：先尽量斜走（一步根号2），剩下不够斜的再直走（一步 1）
+    return std::max(dx, dy) + (ROOT2 - 1.0) * std::min(dx, dy);
+}
+
 // allowDiagonal 为 true 就是 8 邻域（能斜走），false 就只能上下左右
-inline Result find_path(const Map& map, Point start, Point goal, bool allowDiagonal) {
-    const double INF = 1e18;                    // 代表"还没到过"
-    const double ROOT2 = 1.4142135623730951;    // 斜走一步的代价 = 根号2
-
-    // 待办清单里的一项，f 小的先被拿出来展开
-    struct Node {
-        double f = 0.0;
-        double g = 0.0;
-        int x = 0;
-        int y = 0;
-
-        bool operator>(const Node& other) const { return f > other.f; }
-    };
-
-    // 启发函数：估"从 (x,y) 到终点还剩多远"。这个值不能高估，否则 A* 就不保证最优了
-    const auto heuristic = [goal, allowDiagonal, ROOT2](int x, int y) {
-        const double distX = std::abs(x - goal.x);
-        const double distY = std::abs(y - goal.y);
-
-        // 只能上下左右走：曼哈顿距离，在这个走法下刚好不高估
-        if (!allowDiagonal)
-            return distX + distY;
-
-        // 能斜走：先尽量斜走（一步根号2），剩下不够斜的再直走（一步 1）
-        return std::max(distX, distY) + (ROOT2 - 1.0) * std::min(distX, distY);
-    };
-
+inline Result search(const Map& map, Point start, Point goal, bool allowDiagonal) {
     Result result;
-    result.visited.assign(map.cells.size(), 0);
+    // colored 数组：0 = 没碰过，1 = 在 OpenList 里，2 = 已出 OpenList 进 CloseList
+    result.colored.assign(map.cells.size(), 0);
 
-    // g[i] = 从起点走到第 i 格目前找到的最小代价，初始都是无穷大
-    std::vector<double> g(map.cells.size(), INF);
-    // from[i] = 第 i 格是从哪一格走过来的，最后靠它回推整条路径
-    std::vector<int> from(map.cells.size(), -1);
-    // 小顶堆当待办清单，f 最小的先出队
-    std::priority_queue<Node, std::vector<Node>, std::greater<Node>> open;
+    // gBest[i] = 第 i 格目前找到的最好的 g(n)，用来判断新路要不要更新
+    std::vector<double> gBest(map.cells.size(), INF);
+    // parent[i] = 第 i 格的父节点（Parent），最后靠它回推整条路径
+    std::vector<int> parent(map.cells.size(), -1);
+
+    // OpenList：优先队列，f 最小的先出来
+    std::priority_queue<Node, std::vector<Node>, std::greater<Node>> openList;
+
+    Node startNode{start.x, start.y};
+    startNode.h = calc_h(startNode, goal, allowDiagonal);
 
     const int startIndex = map.index(start.x, start.y);
-    g[startIndex] = 0.0;
-    open.push(Node{heuristic(start.x, start.y), 0.0, start.x, start.y});
-    result.visited[startIndex] = 1;
+    gBest[startIndex] = 0.0;
+    result.colored[startIndex] = 1;
+    openList.push(startNode);
 
     // 八个方向：前 4 个是上下左右，后 4 个是四个斜角
-    const int dirX[8] = {1, -1, 0, 0, 1, 1, -1, -1};
-    const int dirY[8] = {0, 0, 1, -1, 1, -1, 1, -1};
+    const int dx[8] = {1, -1, 0, 0, 1, 1, -1, -1};
+    const int dy[8] = {0, 0, 1, -1, 1, -1, 1, -1};
 
-    while (!open.empty()) {
-        const Node now = open.top();
-        open.pop();
+    while (!openList.empty()) {
+        const Node now = openList.top();
+        openList.pop();
 
         const int nowIndex = map.index(now.x, now.y);
 
-        // 同一格可能被改进多次、在堆里躺了好几份。这份的 g 比记录里的大，
-        // 说明是过期数据，直接跳过。比从堆里精确删元素简单得多
-        if (now.g > g[nowIndex])
+        // 同一格可能被改进多次、在 OpenList 里躺了好几份。这份已经进过 CloseList，
+        // 说明是过期数据，直接跳过。这就是资料里说的"每次从 OpenList 拿点时查一下 Colored"
+        if (result.colored[nowIndex] == 2)
             continue;
 
-        result.visited[nowIndex] = 2;   // 标记成"已展开"
+        result.colored[nowIndex] = 2;   // 进 CloseList
         ++result.expanded;
 
         // 拿出来的正好是终点，收工
         if (now.x == goal.x && now.y == goal.y) {
             result.found = true;
+            result.g = now.g;
             break;
         }
 
         // 不允许斜走时只看前 4 个方向
         const int count = allowDiagonal ? 8 : 4;
         for (int i = 0; i < count; ++i) {
-            const int nextX = now.x + dirX[i];
-            const int nextY = now.y + dirY[i];
+            const int nextX = now.x + dx[i];
+            const int nextY = now.y + dy[i];
             if (!map.free(nextX, nextY))    // 出界或撞墙
                 continue;
 
-            // 斜走时还要看会不会从两个障碍的缝里穿过去（穿墙角不合法）
-            const bool diagonal = dirX[i] != 0 && dirY[i] != 0;
-            if (diagonal && (!map.free(now.x + dirX[i], now.y) || !map.free(now.x, now.y + dirY[i])))
-                continue;
-
-            // 从当前格走到这一格，一共要花多少
-            const double step = now.g + (diagonal ? ROOT2 : 1.0);
             const int nextIndex = map.index(nextX, nextY);
-            if (step >= g[nextIndex])       // 不比已知的更好，就不用更新
+            if (result.colored[nextIndex] == 2)     // 已经在 CloseList 里了，不用再看
                 continue;
 
-            g[nextIndex] = step;
-            from[nextIndex] = nowIndex;
-            result.visited[nextIndex] = 1;
-            open.push(Node{step + heuristic(nextX, nextY), step, nextX, nextY});
+            // 斜走时还要看会不会从两个障碍的缝里穿过去（穿墙角不合法）
+            const bool diagonal = dx[i] != 0 && dy[i] != 0;
+            if (diagonal && (!map.free(now.x + dx[i], now.y) || !map.free(now.x, now.y + dy[i])))
+                continue;
+
+            // g(n) = calc_g(n, parent) + g(parent)：这里 g(parent) 就是 now.g
+            Node child{nextX, nextY};
+            child.g = now.g + calc_g(child, now);
+            if (child.g >= gBest[nextIndex])    // 不比已知的更好，就不用更新
+                continue;
+
+            child.h = calc_h(child, goal, allowDiagonal);
+            gBest[nextIndex] = child.g;
+            parent[nextIndex] = nowIndex;
+            result.colored[nextIndex] = 1;
+            openList.push(child);
         }
     }
 
-    // 找到就顺着 from 从终点往回走，走完翻转过来就是"起点→终点"
+    // 找到就顺着 parent 从终点往回走，走完翻转过来就是"起点→终点"
     if (result.found) {
-        const int goalIndex = map.index(goal.x, goal.y);
-        result.cost = g[goalIndex];
-
-        int index = goalIndex;
+        int index = map.index(goal.x, goal.y);
         while (index != -1) {
             result.path.push_back(Point{index % map.width, index / map.width});
-            index = from[index];
+            index = parent[index];
         }
         std::reverse(result.path.begin(), result.path.end());
     }
@@ -254,26 +285,26 @@ inline Result find_path(const Map& map, Point start, Point goal, bool allowDiago
 }
 ```
 
-`src/main.cpp` 就干三件事：造地图、调 `find_path`、把结果画成 PNG。画图就是每格用 `cv::rectangle` 填一种灰度，路径用 `cv::polylines` 连成折线，起点终点格子填白、写上 `S` / `G`，别的一律不画。数字改在终端里看：
+`src/main.cpp` 就干三件事：造地图、调 `search`、把结果画成 PNG。画图就是每格用 `cv::rectangle` 填一种灰度（看 `colored`：2 画浅灰、1 画中灰），路径用 `cv::polylines` 连成折线，起点终点格子填白、写上 `S` / `G`，别的一律不画。数字改在终端里看：
 
 ```bash
-[tiny_5x5] 找到路径  expanded=20  points=8  cost=7.4
-[regular_12x12] 找到路径  expanded=88  points=41  cost=41.7
-[rooms] 找到路径  expanded=527  points=60  cost=71.8
-[random] 找到路径  expanded=612  points=69  cost=77.9
-[rooms / 4-neighbor] 找到路径  expanded=701  points=91  cost=90.0
-[rooms / 8-neighbor] 找到路径  expanded=527  points=60  cost=71.8
+[tiny_5x5] 找到路径  expanded=20  points=8  g=7.4
+[regular_12x12] 找到路径  expanded=88  points=41  g=41.7
+[rooms] 找到路径  expanded=476  points=60  g=71.8
+[random] 找到路径  expanded=612  points=69  g=77.9
+[rooms / 4-neighbor] 找到路径  expanded=701  points=91  g=90.0
+[rooms / 8-neighbor] 找到路径  expanded=476  points=60  g=71.8
 ```
 
 ## 三、结果
 
 四张地图我都跑了，全部找到路径：
 
-| 地图 | 尺寸 | 展开格数 | 路径点数 | 路径代价 |
+| 地图 | 尺寸 | 展开格数 | 路径点数 | 总代价 g |
 |---|---|---|---|---|
 | tiny_5x5 | 5×5 | 20 | 8 | 7.4 |
 | regular_12x12 | 12×12 | 88 | 41 | 41.7 |
-| rooms | 60×40 | 527 | 60 | 71.8 |
+| rooms | 60×40 | 476 | 60 | 71.8 |
 | random | 60×40 | 612 | 69 | 77.9 |
 
 **5×5 最小地图**：中间竖着一道 1×3 的墙，起点在左上角、终点在右下角，路径得绕过去。代价 7.4，就是 1 步斜走（1.41）加 6 步直走。
@@ -284,7 +315,7 @@ inline Result find_path(const Map& map, Point start, Point goal, bool allowDiago
 
 ![12x12 地图](task4/output/regular_12x12.png)
 
-**60×40 房间地图**：墙把地图切成几个房间，得绕门洞走。浅灰是搜过的格子，中灰是待办清单贴着障碍的那层边。
+**60×40 房间地图**：墙把地图切成几个房间，得绕门洞走。浅灰是展开过的格子（CloseList），中灰是还在待办清单里、贴着障碍的那层边（OpenList）。
 
 ![rooms 地图](task4/output/rooms.png)
 
@@ -294,13 +325,13 @@ inline Result find_path(const Map& map, Point start, Point goal, bool allowDiago
 
 ![4邻域与8邻域](task4/output/neighbors.png)
 
-| 配置 | 展开格数 | 路径点数 | 路径代价 |
+| 配置 | 展开格数 | 路径点数 | 总代价 g |
 |---|---|---|---|
 | 4 邻域（只能上下左右） | 701 | 91 | 90.0 |
-| 8 邻域（可斜走） | 527 | 60 | 71.8 |
+| 8 邻域（可斜走） | 476 | 60 | 71.8 |
 
-这次两边一比，**8 邻域是又快又短**：展开的格子少了四分之一，代价从 90 降到 71.8，少了 20%。
+这次两边一比，**8 邻域是又快又短**：展开的格子少了三成，代价从 90 降到 71.8，少了 20%。
 
 4 邻域那个 90 也对得上——从 (2,2) 到 (57,37) 横竖各要走 55+35=90 步，一步代价 1，所以就是 90。8 邻域能斜走，路径点数从 91 掉到 60，也不再是一格一格的锯齿了。所以能斜走就让它斜走。
 
-另外踩了两个坑：一是斜走会穿墙（就是代码里那段 `diagonal` 判断），二是同一个格子会在优先队列里躺好几份（我用 `if (now.g > g[nowIndex]) continue;` 跳过过期数据）。
+另外踩了两个坑：一是斜走会穿墙（就是代码里那段 `diagonal` 判断），二是同一个格子会在优先队列里躺好几份（用 `colored[nowIndex] == 2` 跳过过期数据）。顺便一提，`expanded` 以前会重复统计同一格，现在改成按 CloseList 去重，所以 rooms 从 527 变成了 476，路径和代价没变。
