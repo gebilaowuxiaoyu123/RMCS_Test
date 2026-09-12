@@ -14,21 +14,34 @@
 
 namespace {
 
-const cv::Scalar FREE_COLOR(255, 255, 255);
-const cv::Scalar WALL_COLOR(70, 70, 70);
-const cv::Scalar VISITED_COLOR(235, 206, 135);
-const cv::Scalar OPEN_COLOR(170, 220, 255);
-const cv::Scalar PATH_COLOR(50, 40, 240);
-const cv::Scalar START_COLOR(60, 180, 75);
-const cv::Scalar GOAL_COLOR(230, 120, 60);
+const int FREE_LEVEL = 255;
+const int WALL_LEVEL = 0;
+const int VISITED_LEVEL = 214;
+const int OPEN_LEVEL = 168;
+const int GRID_LEVEL = 238;
+const int PATH_LEVEL = 70;
 
 void put_text(cv::Mat& image, const std::string& text, int row) {
     const cv::Point origin{8, 22 + row * 20};
     cv::putText(
-        image, text, origin, cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 0), 4, cv::LINE_AA);
+        image, text, origin, cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(FREE_LEVEL), 4, cv::LINE_AA);
     cv::putText(
-        image, text, origin, cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(255, 255, 255), 2,
-        cv::LINE_AA);
+        image, text, origin, cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(WALL_LEVEL), 2, cv::LINE_AA);
+}
+
+void put_mark(cv::Mat& image, Point point, int cell, const std::string& letter) {
+    cv::rectangle(
+        image, cv::Rect(point.x * cell, point.y * cell, cell, cell), cv::Scalar(FREE_LEVEL),
+        cv::FILLED);
+
+    const double scale = cell / 40.0;
+    const int thickness = cell >= 30 ? 2 : 1;
+    int baseline = 0;
+    const cv::Size size = cv::getTextSize(letter, cv::FONT_HERSHEY_SIMPLEX, scale, thickness, &baseline);
+    const cv::Point center{point.x * cell + cell / 2, point.y * cell + cell / 2};
+    cv::putText(
+        image, letter, cv::Point{center.x - size.width / 2, center.y + size.height / 2},
+        cv::FONT_HERSHEY_SIMPLEX, scale, cv::Scalar(WALL_LEVEL), thickness, cv::LINE_AA);
 }
 
 std::string info_text(const Result& result) {
@@ -41,49 +54,48 @@ std::string info_text(const Result& result) {
 cv::Mat draw(
     const Map& map, const Result& result, Point start, Point goal, const std::string& title) {
 
-    const int cell = std::max(6, 480 / map.width);
-    cv::Mat image(map.height * cell, map.width * cell, CV_8UC3, FREE_COLOR);
+    const int cell = std::max(14, 480 / map.width);
+    cv::Mat image(map.height * cell, map.width * cell, CV_8UC1, cv::Scalar(FREE_LEVEL));
 
     for (int y = 0; y < map.height; ++y) {
         for (int x = 0; x < map.width; ++x) {
-            cv::Scalar color = FREE_COLOR;
+            int level = FREE_LEVEL;
             const auto state = result.visited[map.index(x, y)];
             if (!map.free(x, y))
-                color = WALL_COLOR;
+                level = WALL_LEVEL;
             else if (state == 2)
-                color = VISITED_COLOR;
+                level = VISITED_LEVEL;
             else if (state == 1)
-                color = OPEN_COLOR;
-            cv::rectangle(image, cv::Rect(x * cell, y * cell, cell, cell), color, cv::FILLED);
+                level = OPEN_LEVEL;
+            cv::rectangle(
+                image, cv::Rect(x * cell, y * cell, cell, cell), cv::Scalar(level), cv::FILLED);
         }
     }
 
-    if (cell >= 12) {
-        for (int x = 0; x <= map.width; ++x)
-            cv::line(
-                image, cv::Point{x * cell, 0}, cv::Point{x * cell, image.rows},
-                cv::Scalar(205, 205, 205), 1);
-        for (int y = 0; y <= map.height; ++y)
-            cv::line(
-                image, cv::Point{0, y * cell}, cv::Point{image.cols, y * cell},
-                cv::Scalar(205, 205, 205), 1);
-    }
+    for (int x = 0; x <= map.width; ++x)
+        cv::line(
+            image, cv::Point{x * cell, 0}, cv::Point{x * cell, image.rows},
+            cv::Scalar(GRID_LEVEL), 1);
+    for (int y = 0; y <= map.height; ++y)
+        cv::line(
+            image, cv::Point{0, y * cell}, cv::Point{image.cols, y * cell}, cv::Scalar(GRID_LEVEL),
+            1);
 
     if (!result.path.empty()) {
         std::vector<cv::Point> centers;
         for (const auto& point : result.path)
             centers.emplace_back(point.x * cell + cell / 2, point.y * cell + cell / 2);
-        cv::polylines(image, centers, false, PATH_COLOR, 2, cv::LINE_AA);
+        cv::polylines(image, centers, false, cv::Scalar(PATH_LEVEL), 2, cv::LINE_AA);
     }
 
-    cv::rectangle(
-        image, cv::Rect(start.x * cell, start.y * cell, cell, cell), START_COLOR, cv::FILLED);
-    cv::rectangle(
-        image, cv::Rect(goal.x * cell, goal.y * cell, cell, cell), GOAL_COLOR, cv::FILLED);
+    put_mark(image, start, cell, "S");
+    put_mark(image, goal, cell, "G");
 
-    put_text(image, title, 0);
-    put_text(image, info_text(result), 1);
-    return image;
+    cv::Mat canvas(image.rows + 46, image.cols, CV_8UC1, cv::Scalar(FREE_LEVEL));
+    image.copyTo(canvas(cv::Rect(0, 46, image.cols, image.rows)));
+    put_text(canvas, title, 0);
+    put_text(canvas, info_text(result), 1);
+    return canvas;
 }
 
 cv::Mat side_by_side(const std::vector<cv::Mat>& images) {
@@ -95,7 +107,7 @@ cv::Mat side_by_side(const std::vector<cv::Mat>& images) {
         }
         cv::Mat padded;
         cv::copyMakeBorder(
-            images[i], padded, 0, 0, 12, 0, cv::BORDER_CONSTANT, cv::Scalar(235, 235, 235));
+            images[i], padded, 0, 0, 12, 0, cv::BORDER_CONSTANT, cv::Scalar(GRID_LEVEL));
         cv::hconcat(row, padded, row);
     }
     return row;

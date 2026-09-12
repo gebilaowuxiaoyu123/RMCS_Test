@@ -19,6 +19,15 @@ random.png          60×40 随机障碍地图
 neighbors.png       同一张图 4 邻域 vs 8 邻域对比
 ```
 
+代码就 3 个文件，各管各的：
+
+```
+task4/
+├── include/map.hpp      地图：图多大、哪格能走、怎么造墙
+├── include/astar.hpp    算法：怎么找路（接口和实现都在这一个文件里）
+└── src/main.cpp         主程序：造地图 + 调算法 + 画图
+```
+
 要改地图就改 `src/main.cpp` 的 `make_maps()`：
 
 ```cpp
@@ -28,7 +37,7 @@ maps.push_back(Case{"tiny_5x5", std::move(tiny), Point{0, 0}, Point{4, 4}});
 //                 ↑名字                        ↑起点      ↑终点
 ```
 
-代码就三块，名字都用的最常见的写法：`map.hpp` 管"哪格能走"，`astar` 管"怎么找路"，`main` 管造地图和画图。
+**图是黑白的**（灰度，没有彩色）：白=空地、黑=障碍、浅灰=搜过的格子、中灰=待办清单、深灰=最后那条路径；起点写个 `S`，终点写个 `G`，标题和结果数字放在图上方单独一条白边上，不压着地图。
 
 ## 二、代码
 
@@ -117,6 +126,10 @@ public:
 ```cpp
 #pragma once
 
+#include <algorithm>
+#include <cmath>
+#include <functional>
+#include <queue>
 #include <vector>
 
 #include "map.hpp"
@@ -131,50 +144,33 @@ struct Result {
 };
 
 // allowDiagonal 为 true 就是 8 邻域（能斜走），false 就只能上下左右
-Result find_path(const Map& map, Point start, Point goal, bool allowDiagonal);
-```
+inline Result find_path(const Map& map, Point start, Point goal, bool allowDiagonal) {
+    const double INF = 1e18;                    // 代表"还没到过"
+    const double ROOT2 = 1.4142135623730951;    // 斜走一步的代价 = 根号2
 
-### src/astar.cpp
+    // 待办清单里的一项，f 小的先被拿出来展开
+    struct Node {
+        double f = 0.0;
+        double g = 0.0;
+        int x = 0;
+        int y = 0;
 
-```cpp
-#include "astar.hpp"
+        bool operator>(const Node& other) const { return f > other.f; }
+    };
 
-#include <algorithm>
-#include <cmath>
-#include <queue>
+    // 启发函数：估"从 (x,y) 到终点还剩多远"。这个值不能高估，否则 A* 就不保证最优了
+    const auto heuristic = [goal, allowDiagonal, ROOT2](int x, int y) {
+        const double distX = std::abs(x - goal.x);
+        const double distY = std::abs(y - goal.y);
 
-namespace {
+        // 只能上下左右走：曼哈顿距离，在这个走法下刚好不高估
+        if (!allowDiagonal)
+            return distX + distY;
 
-const double INF = 1e18;                            // 代表"还没到过"
-const double ROOT2 = 1.4142135623730951;            // 斜走一步的代价 = 根号2
+        // 能斜走：先尽量斜走（一步根号2），剩下不够斜的再直走（一步 1）
+        return std::max(distX, distY) + (ROOT2 - 1.0) * std::min(distX, distY);
+    };
 
-// 待办清单里的一项。f 小的先被拿出来展开
-struct Node {
-    double f = 0.0;
-    double g = 0.0;
-    int x = 0;
-    int y = 0;
-
-    // 小顶堆要的比较规则：f 小的排前面
-    bool operator>(const Node& other) const { return f > other.f; }
-};
-
-// 启发函数：估"从 (x,y) 到终点还剩多远"。这个值不能高估，否则 A* 就不保证最优了
-double heuristic(int x, int y, Point goal, bool allowDiagonal) {
-    const double distX = std::abs(x - goal.x);
-    const double distY = std::abs(y - goal.y);
-
-    // 只能上下左右走：曼哈顿距离，在这个走法下刚好不高估
-    if (!allowDiagonal)
-        return distX + distY;
-
-    // 能斜走：先尽量斜走（一步根号2），剩下不够斜的再直走（一步 1）
-    return std::max(distX, distY) + (ROOT2 - 1.0) * std::min(distX, distY);
-}
-
-} // namespace
-
-Result find_path(const Map& map, Point start, Point goal, bool allowDiagonal) {
     Result result;
     result.visited.assign(map.cells.size(), 0);
 
@@ -182,13 +178,12 @@ Result find_path(const Map& map, Point start, Point goal, bool allowDiagonal) {
     std::vector<double> g(map.cells.size(), INF);
     // from[i] = 第 i 格是从哪一格走过来的，最后靠它回推整条路径
     std::vector<int> from(map.cells.size(), -1);
-
     // 小顶堆当待办清单，f 最小的先出队
     std::priority_queue<Node, std::vector<Node>, std::greater<Node>> open;
 
     const int startIndex = map.index(start.x, start.y);
     g[startIndex] = 0.0;
-    open.push(Node{heuristic(start.x, start.y, goal, allowDiagonal), 0.0, start.x, start.y});
+    open.push(Node{heuristic(start.x, start.y), 0.0, start.x, start.y});
     result.visited[startIndex] = 1;
 
     // 八个方向：前 4 个是上下左右，后 4 个是四个斜角
@@ -237,7 +232,7 @@ Result find_path(const Map& map, Point start, Point goal, bool allowDiagonal) {
             g[nextIndex] = step;
             from[nextIndex] = nowIndex;
             result.visited[nextIndex] = 1;
-            open.push(Node{step + heuristic(nextX, nextY, goal, allowDiagonal), step, nextX, nextY});
+            open.push(Node{step + heuristic(nextX, nextY), step, nextX, nextY});
         }
     }
 
@@ -258,7 +253,7 @@ Result find_path(const Map& map, Point start, Point goal, bool allowDiagonal) {
 }
 ```
 
-`src/main.cpp` 就干三件事：造地图、调 `find_path`、把结果画成 PNG。图上颜色对应：空地白、障碍深灰、已展开浅蓝、待办清单浅橙、最终路径红线、起点绿、终点蓝。格子够大时（≥12 像素）会画上浅灰网格线，方便直接数格子。
+`src/main.cpp` 就干三件事：造地图、调 `find_path`、把结果画成 PNG。画图每格用 `cv::rectangle` 填一种灰度，路径用 `cv::polylines` 连成折线，起点终点格子填白后写上 `S` / `G`，最后把标题和数字写在上方那条 46 像素的白边上。
 
 ## 三、结果
 
@@ -279,7 +274,7 @@ Result find_path(const Map& map, Point start, Point goal, bool allowDiagonal) {
 
 ![12x12 地图](task4/output/regular_12x12.png)
 
-**60×40 房间地图**：墙把地图切成几个房间，得绕门洞走。浅蓝是搜过的格子，浅橙是待办清单贴着障碍的那层边。
+**60×40 房间地图**：墙把地图切成几个房间，得绕门洞走。浅灰是搜过的格子，中灰是待办清单贴着障碍的那层边。
 
 ![rooms 地图](task4/output/rooms.png)
 

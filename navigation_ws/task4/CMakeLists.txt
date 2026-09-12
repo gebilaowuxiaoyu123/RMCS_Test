@@ -12,7 +12,6 @@ find_package(OpenCV REQUIRED)
 
 add_executable(task4_astar
     src/main.cpp
-    src/astar.cpp
 )
 
 target_include_directories(task4_astar PRIVATE include ${OpenCV_INCLUDE_DIRS})
