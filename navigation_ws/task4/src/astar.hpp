@@ -9,7 +9,6 @@
 #include "map.hpp"
 
 inline constexpr double INF = 1e18;
-inline constexpr double ROOT2 = 1.4142135623730951;
 
 struct Node {
     int x = 0;
@@ -30,21 +29,11 @@ struct Result {
     std::vector<unsigned char> colored;
 };
 
-inline double calc_g(const Node& node, const Node& parent) {
-    return (node.x != parent.x && node.y != parent.y) ? ROOT2 : 1.0;
+inline double calc_h(const Node& node, Point goal) {
+    return std::abs(node.x - goal.x) + std::abs(node.y - goal.y);
 }
 
-inline double calc_h(const Node& node, Point goal, bool allowDiagonal) {
-    const double dx = std::abs(node.x - goal.x);
-    const double dy = std::abs(node.y - goal.y);
-
-    if (!allowDiagonal)
-        return dx + dy;
-
-    return std::max(dx, dy) + (ROOT2 - 1.0) * std::min(dx, dy);
-}
-
-inline Result search(const Map& map, Point start, Point goal, bool allowDiagonal) {
+inline Result search(const Map& map, Point start, Point goal) {
     Result result;
     result.colored.assign(map.cells.size(), 0);
 
@@ -54,15 +43,15 @@ inline Result search(const Map& map, Point start, Point goal, bool allowDiagonal
     std::priority_queue<Node, std::vector<Node>, std::greater<Node>> openList;
 
     Node startNode{start.x, start.y};
-    startNode.h = calc_h(startNode, goal, allowDiagonal);
+    startNode.h = calc_h(startNode, goal);
 
     const int startIndex = map.index(start.x, start.y);
     gBest[startIndex] = 0.0;
     result.colored[startIndex] = 1;
     openList.push(startNode);
 
-    const int dx[8] = {1, -1, 0, 0, 1, 1, -1, -1};
-    const int dy[8] = {0, 0, 1, -1, 1, -1, 1, -1};
+    const int dx[4] = {1, -1, 0, 0};
+    const int dy[4] = {0, 0, 1, -1};
 
     while (!openList.empty()) {
         const Node now = openList.top();
@@ -81,8 +70,7 @@ inline Result search(const Map& map, Point start, Point goal, bool allowDiagonal
             break;
         }
 
-        const int count = allowDiagonal ? 8 : 4;
-        for (int i = 0; i < count; ++i) {
+        for (int i = 0; i < 4; ++i) {
             const int nextX = now.x + dx[i];
             const int nextY = now.y + dy[i];
             if (!map.free(nextX, nextY))
@@ -92,16 +80,12 @@ inline Result search(const Map& map, Point start, Point goal, bool allowDiagonal
             if (result.colored[nextIndex] == 2)
                 continue;
 
-            const bool diagonal = dx[i] != 0 && dy[i] != 0;
-            if (diagonal && (!map.free(now.x + dx[i], now.y) || !map.free(now.x, now.y + dy[i])))
-                continue;
-
             Node child{nextX, nextY};
-            child.g = now.g + calc_g(child, now);
+            child.g = now.g + 1.0;
             if (child.g >= gBest[nextIndex])
                 continue;
 
-            child.h = calc_h(child, goal, allowDiagonal);
+            child.h = calc_h(child, goal);
             gBest[nextIndex] = child.g;
             parent[nextIndex] = nowIndex;
             result.colored[nextIndex] = 1;

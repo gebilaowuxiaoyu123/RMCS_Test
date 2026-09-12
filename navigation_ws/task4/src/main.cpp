@@ -80,21 +80,6 @@ cv::Mat draw(const Map& map, const Result& result, Point start, Point goal) {
     return image;
 }
 
-cv::Mat side_by_side(const std::vector<cv::Mat>& images) {
-    cv::Mat row;
-    for (std::size_t i = 0; i < images.size(); ++i) {
-        if (i == 0) {
-            row = images[i].clone();
-            continue;
-        }
-        cv::Mat padded;
-        cv::copyMakeBorder(
-            images[i], padded, 0, 0, 12, 0, cv::BORDER_CONSTANT, GRID_COLOR);
-        cv::hconcat(row, padded, row);
-    }
-    return row;
-}
-
 struct Case {
     std::string name;
     Map map;
@@ -148,25 +133,11 @@ int main() {
     const std::string outDir = "output/";
 
     for (auto& item : make_maps()) {
-        const Result result = search(item.map, item.start, item.goal, true);
+        const Result result = search(item.map, item.start, item.goal);
         print_info(item.name, result);
-        cv::imwrite(
-            outDir + item.name + ".png", draw(item.map, result, item.start, item.goal));
+        cv::imwrite(outDir + item.name + ".png", draw(item.map, result, item.start, item.goal));
     }
 
-    const std::vector<Case> maps = make_maps();
-    const Case& rooms = maps[2];
-
-    std::vector<cv::Mat> images;
-    for (const bool allowDiagonal : {false, true}) {
-        const Result result = search(rooms.map, rooms.start, rooms.goal, allowDiagonal);
-        const std::string label = allowDiagonal ? "rooms / 8-neighbor" : "rooms / 4-neighbor";
-        print_info(label, result);
-        images.push_back(draw(rooms.map, result, rooms.start, rooms.goal));
-    }
-    cv::imwrite(outDir + "neighbors.png", side_by_side(images));
-
-    std::cout << "结果图已写入 " << outDir
-              << "{tiny_5x5,regular_12x12,rooms,random,neighbors}.png\n";
+    std::cout << "结果图已写入 " << outDir << "{tiny_5x5,regular_12x12,rooms,random}.png\n";
     return 0;
 }
