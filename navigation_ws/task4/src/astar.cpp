@@ -35,18 +35,14 @@ bool diagonal_allowed(
 
 } // namespace
 
-double heuristic_cost(Heuristic heuristic, GridPoint from, GridPoint to) {
+double heuristic_cost(GridPoint from, GridPoint to, bool allow_diagonal) {
     const double dx = std::abs(static_cast<double>(to.x - from.x));
     const double dy = std::abs(static_cast<double>(to.y - from.y));
 
-    switch (heuristic) {
-    case Heuristic::kZero: return 0.0;
-    case Heuristic::kManhattan: return dx + dy;
-    case Heuristic::kEuclidean: return std::sqrt(dx * dx + dy * dy);
-    case Heuristic::kOctile:
-        return kStraightCost * std::max(dx, dy) + (kDiagonalCost - kStraightCost) * std::min(dx, dy);
-    }
-    return 0.0;
+    if (!allow_diagonal)
+        return dx + dy;
+
+    return kStraightCost * std::max(dx, dy) + (kDiagonalCost - kStraightCost) * std::min(dx, dy);
 }
 
 SearchResult astar(const GridMap& map, GridPoint start, GridPoint goal, const AStarOptions& options) {
@@ -55,7 +51,6 @@ SearchResult astar(const GridMap& map, GridPoint start, GridPoint goal, const AS
 
     SearchResult result;
     result.state.assign(map.size(), 0);
-    result.snapshots.reserve(options.max_snapshots);
 
     std::vector<double> g_score(map.size(), kInfinity);
     std::vector<int> parent(map.size(), -1);
@@ -67,12 +62,10 @@ SearchResult astar(const GridMap& map, GridPoint start, GridPoint goal, const AS
 
     g_score[static_cast<std::size_t>(start_index)] = 0.0;
     open.push(QueueNode{
-        options.heuristic_weight * heuristic_cost(options.heuristic, start, goal), 0.0,
-        start_index});
+        heuristic_cost(start, goal, options.allow_diagonal), 0.0, start_index});
     result.state[static_cast<std::size_t>(start_index)] = 1;
 
-    const int step[8][2] = {
-        {1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {1, -1}, {-1, 1}, {-1, -1}};
+    const int step[8][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {1, -1}, {-1, 1}, {-1, -1}};
 
     bool found = false;
 
@@ -86,13 +79,6 @@ SearchResult astar(const GridMap& map, GridPoint start, GridPoint goal, const AS
 
         result.state[current_index] = 2;
         ++result.stats.expanded;
-
-        if (options.snapshot_interval != 0
-            && result.stats.expanded % options.snapshot_interval == 0
-            && result.snapshots.size() < options.max_snapshots) {
-            result.snapshots.push_back(result.state);
-            result.snapshot_expanded.push_back(result.stats.expanded);
-        }
 
         if (current.index == goal_index) {
             found = true;
@@ -115,6 +101,7 @@ SearchResult astar(const GridMap& map, GridPoint start, GridPoint goal, const AS
 
             const double tentative =
                 g_score[current_index] + (diagonal ? kDiagonalCost : kStraightCost);
+
             const auto to_index = map.index(to);
             if (tentative >= g_score[to_index])
                 continue;
@@ -122,10 +109,9 @@ SearchResult astar(const GridMap& map, GridPoint start, GridPoint goal, const AS
             g_score[to_index] = tentative;
             parent[to_index] = current.index;
             result.state[to_index] = 1;
-            ++result.stats.generated;
             open.push(QueueNode{
-                tentative + options.heuristic_weight * heuristic_cost(options.heuristic, to, goal),
-                tentative, static_cast<int>(to_index)});
+                tentative + heuristic_cost(to, goal, options.allow_diagonal), tentative,
+                static_cast<int>(to_index)});
         }
     }
 
@@ -134,9 +120,7 @@ SearchResult astar(const GridMap& map, GridPoint start, GridPoint goal, const AS
     if (found) {
         int index = goal_index;
         while (index != -1) {
-            const GridPoint point{
-                index % map.width(), index / map.width()};
-            result.path.push_back(point);
+            result.path.push_back(GridPoint{index % map.width(), index / map.width()});
             index = parent[static_cast<std::size_t>(index)];
         }
         std::reverse(result.path.begin(), result.path.end());

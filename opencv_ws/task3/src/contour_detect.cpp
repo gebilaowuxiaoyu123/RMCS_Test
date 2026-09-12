@@ -54,6 +54,15 @@ int main(int argc, char** argv) {
     const std::string input_path = argc > 1 ? argv[1] : "images/fruits.jpg";
     const std::string output_prefix = argc > 2 ? argv[2] : "output/result";
     const double min_length = argc > 3 ? std::atof(argv[3]) : 40.0;
+    double canny_low = argc > 4 ? std::atof(argv[4]) : 60.0;
+    double canny_high = argc > 5 ? std::atof(argv[5]) : 180.0;
+    int blur_size = argc > 6 ? std::atoi(argv[6]) : 5;
+    if (blur_size < 1)
+        blur_size = 1;
+    if (blur_size % 2 == 0)
+        ++blur_size;
+    if (canny_low > canny_high)
+        std::swap(canny_low, canny_high);
 
     const cv::Mat image = cv::imread(input_path, cv::IMREAD_COLOR);
     if (image.empty()) {
@@ -65,10 +74,10 @@ int main(int argc, char** argv) {
     cv::cvtColor(image, gray, cv::COLOR_BGR2GRAY);
 
     cv::Mat blurred;
-    cv::GaussianBlur(gray, blurred, cv::Size{5, 5}, 1.5);
+    cv::GaussianBlur(gray, blurred, cv::Size(blur_size, blur_size), 1.5);
 
     cv::Mat edges;
-    cv::Canny(blurred, edges, 60, 180);
+    cv::Canny(blurred, edges, canny_low, canny_high);
     cv::morphologyEx(
         edges, edges, cv::MORPH_CLOSE, cv::getStructuringElement(cv::MORPH_RECT, {3, 3}));
 
@@ -104,6 +113,8 @@ int main(int argc, char** argv) {
         stack_panel(original_view, gray_view, edge_view, contour_view));
 
     std::cout << "图片: " << input_path << " (" << image.cols << "x" << image.rows << ")\n";
+    std::cout << "参数: 模糊核=" << blur_size << " Canny低阀=" << canny_low
+              << " 高阀=" << canny_high << " 最小周长=" << min_length << "\n";
     std::cout << "检出轮廓: " << contours.size() << " 条, 周长 > " << min_length << " 的保留 "
               << kept.size() << " 条\n";
     std::cout << "结果已写入: " << output_prefix << "_{gray,edges,contours,overlay,compare}.png\n";

@@ -2,10 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <string>
 #include <vector>
-
-#include <opencv2/core.hpp>
 
 namespace nav {
 
@@ -20,8 +17,6 @@ struct GridPoint {
 class GridMap {
 public:
     GridMap(int width, int height);
-
-    static GridMap from_image(const std::string& path, int threshold = 128);
 
     int width() const { return width_; }
     int height() const { return height_; }
@@ -42,9 +37,6 @@ public:
     void fill_rect(GridPoint top_left, int width, int height, bool occupied = true);
     void fill_border(int thickness);
     void fill_random(double obstacle_ratio, unsigned seed);
-    void carve_maze(unsigned seed);
-
-    std::vector<GridPoint> free_cells() const;
 
 private:
     int width_;
