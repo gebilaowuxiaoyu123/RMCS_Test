@@ -2,133 +2,101 @@
 
 #include <algorithm>
 #include <cmath>
-#include <limits>
 #include <queue>
-#include <stdexcept>
-
-namespace nav {
 
 namespace {
 
-constexpr double kInfinity = std::numeric_limits<double>::infinity();
-constexpr double kStraightCost = 1.0;
-constexpr double kDiagonalCost = 1.4142135623730951;
+const double INF = 1e18;
+const double ROOT2 = 1.4142135623730951;
 
-struct QueueNode {
+struct Node {
     double f = 0.0;
     double g = 0.0;
-    int index = -1;
+    int x = 0;
+    int y = 0;
 
-    bool operator>(const QueueNode& other) const {
-        if (f != other.f)
-            return f > other.f;
-        return g < other.g;
-    }
+    bool operator>(const Node& other) const { return f > other.f; }
 };
 
-bool diagonal_allowed(
-    const GridMap& map, GridPoint from, GridPoint to, bool prevent_corner_cutting) {
-    if (!prevent_corner_cutting)
-        return true;
-    return map.is_free(GridPoint{to.x, from.y}) && map.is_free(GridPoint{from.x, to.y});
+double heuristic(int x, int y, Point goal, bool allowDiagonal) {
+    const double distX = std::abs(x - goal.x);
+    const double distY = std::abs(y - goal.y);
+
+    if (!allowDiagonal)
+        return distX + distY;
+
+    return std::max(distX, distY) + (ROOT2 - 1.0) * std::min(distX, distY);
 }
 
 } // namespace
 
-double heuristic_cost(GridPoint from, GridPoint to, bool allow_diagonal) {
-    const double dx = std::abs(static_cast<double>(to.x - from.x));
-    const double dy = std::abs(static_cast<double>(to.y - from.y));
+Result find_path(const Map& map, Point start, Point goal, bool allowDiagonal) {
+    Result result;
+    result.visited.assign(map.cells.size(), 0);
 
-    if (!allow_diagonal)
-        return dx + dy;
+    std::vector<double> g(map.cells.size(), INF);
+    std::vector<int> from(map.cells.size(), -1);
 
-    return kStraightCost * std::max(dx, dy) + (kDiagonalCost - kStraightCost) * std::min(dx, dy);
-}
+    std::priority_queue<Node, std::vector<Node>, std::greater<Node>> open;
 
-SearchResult astar(const GridMap& map, GridPoint start, GridPoint goal, const AStarOptions& options) {
-    if (!map.is_free(start) || !map.is_free(goal))
-        throw std::invalid_argument("起点或终点落在障碍上");
+    const int startIndex = map.index(start.x, start.y);
+    g[startIndex] = 0.0;
+    open.push(Node{heuristic(start.x, start.y, goal, allowDiagonal), 0.0, start.x, start.y});
+    result.visited[startIndex] = 1;
 
-    SearchResult result;
-    result.state.assign(map.size(), 0);
-
-    std::vector<double> g_score(map.size(), kInfinity);
-    std::vector<int> parent(map.size(), -1);
-
-    const int start_index = static_cast<int>(map.index(start));
-    const int goal_index = static_cast<int>(map.index(goal));
-
-    std::priority_queue<QueueNode, std::vector<QueueNode>, std::greater<QueueNode>> open;
-
-    g_score[static_cast<std::size_t>(start_index)] = 0.0;
-    open.push(QueueNode{
-        heuristic_cost(start, goal, options.allow_diagonal), 0.0, start_index});
-    result.state[static_cast<std::size_t>(start_index)] = 1;
-
-    const int step[8][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {1, -1}, {-1, 1}, {-1, -1}};
-
-    bool found = false;
+    const int dirX[8] = {1, -1, 0, 0, 1, 1, -1, -1};
+    const int dirY[8] = {0, 0, 1, -1, 1, -1, 1, -1};
 
     while (!open.empty()) {
-        const QueueNode current = open.top();
+        const Node now = open.top();
         open.pop();
 
-        const auto current_index = static_cast<std::size_t>(current.index);
-        if (current.g > g_score[current_index])
+        const int nowIndex = map.index(now.x, now.y);
+        if (now.g > g[nowIndex])
             continue;
 
-        result.state[current_index] = 2;
-        ++result.stats.expanded;
+        result.visited[nowIndex] = 2;
+        ++result.expanded;
 
-        if (current.index == goal_index) {
-            found = true;
+        if (now.x == goal.x && now.y == goal.y) {
+            result.found = true;
             break;
         }
 
-        const GridPoint from{
-            static_cast<int>(current_index % static_cast<std::size_t>(map.width())),
-            static_cast<int>(current_index / static_cast<std::size_t>(map.width()))};
-
-        const int neighbour_count = options.allow_diagonal ? 8 : 4;
-        for (int i = 0; i < neighbour_count; ++i) {
-            const GridPoint to{from.x + step[i][0], from.y + step[i][1]};
-            if (!map.is_free(to))
+        const int count = allowDiagonal ? 8 : 4;
+        for (int i = 0; i < count; ++i) {
+            const int nextX = now.x + dirX[i];
+            const int nextY = now.y + dirY[i];
+            if (!map.free(nextX, nextY))
                 continue;
 
-            const bool diagonal = step[i][0] != 0 && step[i][1] != 0;
-            if (diagonal && !diagonal_allowed(map, from, to, options.prevent_corner_cutting))
+            const bool diagonal = dirX[i] != 0 && dirY[i] != 0;
+            if (diagonal && (!map.free(now.x + dirX[i], now.y) || !map.free(now.x, now.y + dirY[i])))
                 continue;
 
-            const double tentative =
-                g_score[current_index] + (diagonal ? kDiagonalCost : kStraightCost);
-
-            const auto to_index = map.index(to);
-            if (tentative >= g_score[to_index])
+            const double step = now.g + (diagonal ? ROOT2 : 1.0);
+            const int nextIndex = map.index(nextX, nextY);
+            if (step >= g[nextIndex])
                 continue;
 
-            g_score[to_index] = tentative;
-            parent[to_index] = current.index;
-            result.state[to_index] = 1;
-            open.push(QueueNode{
-                tentative + heuristic_cost(to, goal, options.allow_diagonal), tentative,
-                static_cast<int>(to_index)});
+            g[nextIndex] = step;
+            from[nextIndex] = nowIndex;
+            result.visited[nextIndex] = 1;
+            open.push(Node{step + heuristic(nextX, nextY, goal, allowDiagonal), step, nextX, nextY});
         }
     }
 
-    result.stats.found = found;
+    if (result.found) {
+        const int goalIndex = map.index(goal.x, goal.y);
+        result.cost = g[goalIndex];
 
-    if (found) {
-        int index = goal_index;
+        int index = goalIndex;
         while (index != -1) {
-            result.path.push_back(GridPoint{index % map.width(), index / map.width()});
-            index = parent[static_cast<std::size_t>(index)];
+            result.path.push_back(Point{index % map.width, index / map.width});
+            index = from[index];
         }
         std::reverse(result.path.begin(), result.path.end());
-        result.stats.path_points = result.path.size();
-        result.stats.path_cost = g_score[static_cast<std::size_t>(goal_index)];
     }
 
     return result;
 }
-
-} // namespace nav

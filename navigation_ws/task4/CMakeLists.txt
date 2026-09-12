@@ -12,7 +12,6 @@ find_package(OpenCV REQUIRED)
 
 add_executable(task4_astar
     src/main.cpp
-    src/grid_map.cpp
     src/astar.cpp
 )
 
