@@ -17,3 +17,7 @@
 # 任务四：Hybrid A* 参考模板（第三方，仅本地参考，不入库）
 /navigation_ws/Hybrid_Astar_for_Navigation/
 /navigation_ws/task4/build/
+
+# 2027 导航方向：官方导航依赖栈（第三方多仓库，仅本地参考，不入库）
+# 拉取方式见 docs/zh-cn/第三周/navigation_planner.md
+/rmcs_ws/src/rmcs-navigation-deps/
