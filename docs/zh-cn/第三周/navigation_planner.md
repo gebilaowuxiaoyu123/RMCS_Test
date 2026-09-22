@@ -22,40 +22,69 @@
 
 ---
 
-## 二、⚠️ 先说一个必须澄清的问题
+## 二、基线确认：现在的规划器确实是 NavfnPlanner ✅
 
-细则写"不能用现在的 **NavfnPlanner**"，但**当前 main 分支上早就不用它了**：
+### 2.1 结论
+
+**细则表述正确**，"现在的规划器"就是 `nav2_navfn_planner::NavfnPlanner`：
 
 ```yaml
-# rmcs-navigation/config/motion.yaml（当前 HEAD = d57fa1c "chore: block fortress"）
+# rmcs-navigation/config/motion.yaml（上游 main，已实测确认）
 planner_server:
   ros__parameters:
     planner_plugins: ["GridBased"]
     GridBased:
-      plugin: "nav2_theta_star_planner::ThetaStarPlanner"   # ← 现在是 ThetaStar
+      plugin: "nav2_navfn_planner::NavfnPlanner"   # ← 现在的规划器
+      tolerance: 0.5
+      use_astar: true
       allow_unknown: true
-      tolerance: 0.1
-      how_many_corners: 8
-      w_euc_cost: 1.0
-      w_traversal_cost: 4.0
       use_final_approach_orientation: false
 ```
 
-在官方组织的代码里能搜到的 **NavFn 版本是历史版本**：
+运行时实测（`ros2 param get`）：
 
-```yaml
-# 旧版本
-plugin: "nav2_navfn_planner::NavfnPlanner"
-tolerance: 0.5
-use_astar: true
-allow_unknown: true
+```
+$ ros2 param get /planner_server GridBased.plugin
+String value is: nav2_navfn_planner::NavfnPlanner
 ```
 
-**结论：细则成文时还是 NavFn 时代，之后被换成了 ThetaStar。**
+### 2.2 曾经踩过的坑：读到了过期的 commit
 
-→ **需要向组长确认的问题**：基线以哪个为准？这决定验收 1 里"与现有规划器的差异"该怎么讲。
+第一次拉取时，父仓库 `rmcs-navigation-deps` pin 的子模块是 **`d57fa1c`（2026-05-22）**，
+那个版本里规划器是 `ThetaStarPlanner`，一度让人以为"细则过时了"。实际是**父仓库 pin 的版本太旧**。
 
-> 不论是哪个答案，**选 `SmacPlanner2D` 都是安全且合理**的（见第五节）。
+查历史可见规划器被主动改回过 NavFn：
+
+```
+$ git log -p d57fa1c..main -- config/motion.yaml | grep -E '^[+-].*plugin:'
+commit 3663d5f  wip: localization api, refactor impl and adjust nav2 config
+-      plugin: "nav2_theta_star_planner::ThetaStarPlanner"
++      plugin: "nav2_navfn_planner::NavfnPlanner"
+```
+
+时间线：
+
+| commit | 日期 | 规划器 | 说明 |
+|---|---|---|---|
+| `d57fa1c` | 2026-05-22 | ThetaStar | 父仓库 pin 的版本，**且缺 `rmcs_description` 依赖声明，编译不过** |
+| `3663d5f` | — | → NavFn | 主动改回 |
+| `632962c`（main，2026-08-11） | 2026-08-11 | **NavFn** | 上游最新，含依赖修复 |
+
+**教训**：判断"现在用什么"要以**上游最新分支**为准，不能只看父仓库 pin 的 commit。
+
+### 2.3 因此基线取 main
+
+工作分支基于 **上游 `main`（`632962c`）**，而不是父仓库 pin 的 `d57fa1c`，原因有二：
+
+1. `d57fa1c` **缺少 `<depend>rmcs_description</depend>`，根本编译不过**：
+   ```
+   fatal error: rmcs_description/sentry_description.hpp: No such file or directory
+   ```
+   `main` 的 `632962c` 提交正是 "fix: declare rmcs_description dependency"。
+2. 细则所指的 NavFn 只存在于 `main` 上。
+
+> ⚠️ 这是个需要**向组长报备**的偏离：我们没沿用 `rmcs-navigation-deps` 默认 pin 的版本，
+> 因为那个版本无法构建。建议同时反馈"父仓库的子模块指针该更新了"。
 
 ---
 
@@ -77,17 +106,20 @@ allow_unknown: true
 
 ### 3.2 地图**已有**，不需要等扫描件 ✅
 
-`rmcs-navigation/maps/` 目录：
+`rmcs-navigation/maps/` 目录（以 `main` 为准）：
 
 | 文件 | 像素 | 分辨率 | 实际覆盖 |
 |---|---|---|---|
-| **`rmuc-v2.png`** + `rmuc.yaml` | 292 × 161 | 0.1 m/px | **29.2 m × 16.1 m**（RMUC 场地） |
+| **`rmuc-v2.png`** + `rmuc.yaml` | 292 × 161 | 0.1 m/px | **29.2 m × 16.1 m**（RMUC 场地，**默认使用这张**） |
+| `rmuc-v3.png` | 292 × 161 | — | 同尺寸的另一个版本，暂无 yaml 引用 |
 | `rmul.png` + `rmul.yaml` | 240 × 160 | 0.05 m/px | 12.0 m × 8.0 m（RMUL 场地） |
-| `empty.png` + `empty.yaml` | 2000 × 2000 | — | 空图，做对照实验用 |
+| `战队.png` + `战队.yaml` | 343 × 110 | 0.1 m/px | 34.3 m × 11.0 m（另一张场地） |
+| `empty.png` + `empty.yaml` | 2000 × 2000 | 0.05 m/px | 100 m × 100 m 空图，做对照/局部 mock |
 
 已验证 `rmuc-v2.png` 内容是**真实场地结构**（中央环形障碍、两侧立柱、对称通道），非占位图。
 
-注意 `rmuc.yaml` 里 `image: rmuc-v2.png`，**生效的是 `rmuc-v2.png`**：
+`static.launch.yaml` 的 `global_map` 参数默认 `rmuc`，而 `rmuc.yaml` 里 `image: rmuc-v2.png`，
+所以**实际生效的是 `rmuc-v2.png`**：
 
 ```yaml
 image: rmuc-v2.png
@@ -100,6 +132,7 @@ free_thresh: 0.196000
 ```
 
 → 组长后续给实际场地扫描件时，**只需替换 png + 改 `resolution` / `origin`**，配置代码不用动。
+也可以直接加一组新的 `xxx.yaml`，启动时用 `global_map:=xxx` 切换。
 
 ### 3.3 容器里可用的全局规划器 ✅
 
@@ -113,15 +146,26 @@ libnav2_navfn_planner.so | libnav2_theta_star_planner.so | libnav2_smac_planner.
 
 ### 3.4 关键参数现状 ✅
 
-| 项 | 值 | 位置 |
+| 项 | 值（`main` 实测） | 位置 |
 |---|---|---|
-| 全局代价地图分辨率 | 未显式指定（继承地图 0.1 m） | `config/motion.yaml` |
-| `footprint` | `[[0.2475, 0.2475], [0.2475, -0.2475], [-0.2475, -0.2475], [-0.2475, 0.2475]]`（0.495 m 见方） | `config/motion.yaml` |
-| 全局膨胀 | `inflation_radius: 0.3` / `cost_scaling_factor: 0.5` | `config/motion.yaml` |
+| 全局规划器 | `nav2_navfn_planner::NavfnPlanner`，`tolerance: 0.5`，`use_astar: true` | `config/motion.yaml` |
+| 全局代价地图 | 未显式指定 `resolution`（继承地图 0.1 m） | `config/motion.yaml` |
+| 全局 `footprint` | `[[0.1, 0.1], [0.1, -0.1], [-0.1, -0.1], [-0.1, 0.1]]`（**0.2 m 见方**） | `config/motion.yaml` |
+| 全局膨胀 | `inflation_radius: 0.5` / `cost_scaling_factor: 0.5` | `config/motion.yaml` |
 | 局部代价地图 | `16 × 16 m`，`resolution: 0.04`，rolling window | `config/motion.yaml` |
-| 局部规划器 | `nav2_mppi_controller::MPPI`，`motion_model: Omni` | `config/motion.yaml` |
+| 局部 `footprint` | `[[0.2475, …]]`（**0.495 m 见方**） | `config/motion.yaml` |
+| 局部膨胀 | `inflation_radius: 0.5` / `cost_scaling_factor: 0.5` | `config/motion.yaml` |
+| 局部规划器 | `nav2_mppi_controller::MPPIController`，`motion_model: Omni` | `config/motion.yaml` |
 | 全局重规划频率 | `RateController hz="1.0"`（行为树里锁 1 Hz） | `config/motion.xml` |
-| 目标容差 | `xy_goal_tolerance: 0.2` | `config/motion.yaml` |
+| 目标容差 | `xy_goal_tolerance: 0.1` | `config/motion.yaml` |
+
+> ⚠️ **两处值得注意的不一致**（可能是调参切入点）：
+> 1. **全局与局部的 footprint 不一致**：全局 0.2 m 见方，局部 0.495 m 见方。
+>    底盘的 `footprint` 源自"斜边 0.7 m"换算出的 0.2475（见 `doc/adjustment-navigation.md` §6），
+>    0.1 更像占位值。全局图偏小会让**全局路径过于贴近障碍**。
+> 2. **膨胀半径 0.5 m 相对 0.1 m 地图偏大**：0.5 m 只占 5 格，
+>    而车宽 0.495 m 时就占约 5 格，窄门洞（RMUC 的"狗洞"）有**膨胀堵死导致无解**的风险。
+>    这两个点在换成 `SmacPlanner2D` 后需要重点试。
 
 > MPPI 已是**各向同性**配置（`vx_std == vy_std == 0.55`，`wz_* = 0.001` 为数值稳定用的 epsilon），符合全向底盘。
 
@@ -185,8 +229,8 @@ flowchart LR
 
 | 规划器 | 原理 | 优点 | 缺点 |
 |---|---|---|---|
-| `NavfnPlanner`（**旧版在用**） | Dijkstra/A\* 栅格势场搜索 | 稳、老牌、行为可预测 | 路径**贴障碍**；输出折线无平滑；大图慢；膨胀大时易无解 |
-| `ThetaStarPlanner`（**现状**） | A\* + 视线检测，任意角度 | 路径短、直、转折少 | 依赖膨胀提供安全距离，安全裕度靠膨胀硬撑 |
+| `NavfnPlanner`（**现状 = 基线**） | Dijkstra/A\* 栅格势场搜索 | 稳、老牌、行为可预测 | 路径**贴障碍**；输出折线无平滑；大图慢；膨胀大时易无解 |
+| `ThetaStarPlanner`（曾被用过，`3663d5f` 已换回 NavFn） | A\* + 视线检测，任意角度 | 路径短、直、转折少 | 依赖膨胀提供安全距离，安全裕度靠膨胀硬撑 |
 | **`SmacPlanner2D`** ⭐ | A\* + **多分辨率降采样** + 代价感知 + 内置平滑 | 路径平滑；**把"离障碍远近"纳入搜索**；大图快；参数友好 | 需要调 smoother；分辨率粗时路径偏糙 |
 | `SmacPlannerHybrid` | 2D + Dubin/Reeds-Shepp 运动学 | 满足最小转弯半径 | 参数多、窄道易无解 |
 | `SmacPlannerLattice` | 状态格 + 运动基元 | 最贴运动学 | 配置最复杂，新手不宜 |
@@ -258,29 +302,86 @@ ros2 param get /planner_server GridBased.cost_penalty     # 回读确认真生�
 
 ## 七、验证与留痕流程
 
-### 7.1 运行
+### 7.1 运行：**无需机器人**的静态测试入口 ✅
+
+`rmcs-navigation` 自带 `launch/static.launch.yaml`，专门用于**纯软件联调**：
+
+> "为纯软件联调提供一个稳定、最小的导航启动环境。在没有任何真实传感器、里程计或 SLAM 输出时，
+> 验证导航链路本身是否能正常启动。"
+
+它启动的内容：
+
+| 启动 | 说明 |
+|---|---|
+| `local_map`（mock） | 用 `maps/empty.yaml`，frame = `base_link` |
+| `global_map` | 用 `maps/<global_map>.yaml`（默认 `rmuc`） |
+| 静态 TF | `world → odom`、`odom → base_link` |
+| `motion.launch.yaml` | `bt_navigator` + `planner_server` + `controller_server` |
+| `foxglove_bridge` | 可视化观测 |
+
+**不启动**：传感器驱动、SLAM/定位、`rmcs_local_map`、`point_lio`。
 
 ```bash
-cd /workspaces/RMCS/rmcs_ws
-colcon build
-source install/setup.bash
+# 构建（注意：必须用 /opt/cmake 的 CMake ≥ 3.30，系统自带 3.28 太旧）
+bash -lc 'export PATH=/opt/cmake/bin:$PATH && cd /workspaces/RMCS/rmcs_ws \
+  && source /opt/ros/jazzy/setup.bash && source install/setup.bash \
+  && colcon build --packages-up-to rmcs-navigation --symlink-install'
+
+# 启动静态导航栈（不需要 C 板、不需要雷达）
+bash -lc 'cd /workspaces/RMCS/rmcs_ws && source install/setup.bash \
+  && ros2 launch rmcs-navigation static.launch.yaml'
+```
+
+实测启动结果（4 个节点全部 `active`）：
+
+```
+/bt_navigator          active [3]
+/planner_server        active [3]
+/controller_server     active [3]
+/global_map            active [3]
+```
+
+**这个入口的价值**：
+
+1. **不用等机器人**就能验证规划器切换是否生效；
+2. 可以**在线改参数**观察效果，不用反复重编译：
+   ```bash
+   ros2 param get  /planner_server GridBased.plugin      # 看当前规划器
+   ros2 param set  /planner_server GridBased.plugin nav2_smac_planner::SmacPlanner2D
+   ```
+   ⚠️ 但"加载哪个插件类名"在进程启动时确定，**换插件必须改 yaml + 重启**；
+   `ros2 param set` 只适合调**数值型**参数（如 `cost_penalty`、`tolerance`）；
+3. 配上 Foxglove 能直接看到 `/plan`、代价地图，是"无卡顿"判据的来源。
+
+### 7.2 环境踩坑（都实测过）
+
+| 坑 | 现象 | 解决 |
+|---|---|---|
+| **zsh 下 source ROS setup 失效** | `source /opt/ros/jazzy/setup.bash` 报 `no such file: .../rmcs_ws/setup.sh` | 该脚本用 `BASH_SOURCE[0]` 定位自身，zsh 里为空。**用 `bash -lc '...'` 包一层** |
+| **CMake 版本太旧** | `CMake 3.30 or higher is required. You are running version 3.28.3` | 用 `/opt/cmake/bin`（4.2.3）：`export PATH=/opt/cmake/bin:$PATH` |
+| **`build-rmcs` 与现有 install 冲突** | `install directory was created with the layout 'isolated'` | 该脚本用 `--merge-install`，与现有 isolated 布局不兼容；直接用 `colcon build` 即可 |
+| **父仓库 pin 的版本编译不过** | `rmcs_description/sentry_description.hpp: No such file or directory` | 见第二节：切到上游 `main` |
+
+### 7.3 完整链路（接机器人时）
+
+```bash
 ros2 launch rmcs_bringup rmcs.launch.py robot:=navigation_test
 ```
 
-观测桥：`ros2 run foxglove_bridge foxglove_bridge --ros-args -p port:=8765`，浏览器连 `ws://localhost:8765`。
+观测桥：`ws://localhost:8765`（Foxglove）。
 
-### 7.2 基线先行（**关键，别跳过**）
+### 7.4 基线先行（**关键，别跳过**）
 
 先用**当前规划器**（ThetaStar，或按组长要求临时切回 NavFn）跑通一次并录屏存档。
 没有基线，"与现有规划器的差异"就只能空谈，验收 1 直接丢分。
 
-### 7.3 留痕位置
+### 7.5 留痕位置
 
 改动文件在 `rmcs-navigation` **子模块**内，不在作业仓库里，所以分两处：
 
 | 位置 | 内容 | 状态 |
 |---|---|---|
-| fork `gebilaowuxiaoyu123/rmcs-navigation`，分支 `feat/smac-global-planner` | 规划器相关改动（`config/motion.yaml` 等） | ✅ fork 与分支已就绪 |
+| fork `gebilaowuxiaoyu123/rmcs-navigation`，分支 `feat/smac-global-planner` | 规划器相关改动（`config/motion.yaml` 等） | ✅ fork 与分支已就绪（基于上游 `main`） |
 | `RMCS_Test`（本作业仓 `main`） | 本文档 + `README.md` 的「导航方向」章节 | ✅ 已推送 |
 
 子模块 remote 已按如下约定配置：
@@ -303,7 +404,7 @@ git push          # → origin，也就是自己的 fork
 > 其余第三方仓库（`opencv`、`Hybrid_Astar_for_Navigation`、`fast_tf`、`rmcs_auto_aim_v2`、
 > `rmcs-navigation-deps` 及其它 5 个子模块）保持指向官方，不推送。详见 `README.md` 的「仓库与推送约定」。
 
-### 7.4 网络注意
+### 7.6 网络注意
 
 本机 **GitHub HTTPS 直连超时，必须走 SSH**（已配置）：
 
@@ -315,14 +416,15 @@ git config --global url."git@github.com:".insteadOf "https://github.com/"
 
 ## 八、待办清单
 
-- [ ] 向组长确认：基线是 NavFn 还是 ThetaStar
+- [x] 确认基线：现在的规划器就是 `NavfnPlanner`（细则表述正确）
 - [x] 拉取依赖（`rmcs-navigation-deps` + 6 个子模块）
 - [x] 确认场地地图可用（`maps/rmuc-v2.png`，292×161 px @ 0.1 m）
-- [x] fork `rmcs-navigation`，推送分支 `feat/smac-global-planner`
-- [x] 本文档推送至 `RMCS_Test`
-- [ ] 补齐运行时依赖：`nav2-mppi-controller`、`py-trees`
-- [ ] 构建通过：`colcon build`
-- [ ] 用**当前规划器**跑通一次 + 录屏（基线）
+- [x] fork `rmcs-navigation`，推送分支 `feat/smac-global-planner`（基于上游 `main`）
+- [x] 补齐运行时依赖：`nav2-mppi-controller`、`py-trees`
+- [x] 构建通过：`rmcs-navigation` 编译成功
+- [x] 验证静态测试栈可启动：4 个节点全部 `active`
+- [ ] **向组长报备**：未沿用父仓库 pin 的 `d57fa1c`（它编译不过），改用上游 `main`
+- [ ] 用**当前规划器**（NavFn）跑通一次 + 录屏（基线）
 - [ ] 切换 `SmacPlanner2D`，编译、跑通、录屏（对比素材）
 - [ ] 按 6.2 的顺序调参，逐条记录现象
 - [ ] 确认 `/plan` 频率稳定（"无卡顿"的客观证据）
@@ -336,9 +438,10 @@ git config --global url."git@github.com:".insteadOf "https://github.com/"
 
 | 风险 | 说明 | 应对 |
 |---|---|---|
-| **运行时依赖缺口** | 镜像里缺 `ros-jazzy-nav2-mppi-controller` 和 `ros-jazzy-py-trees`；**前者是当前配置的局部规划器**，缺了 `controller_server` 起不来 | 容器内可免密 `sudo apt-get install` 补齐（Dockerfile 装的是 nav2 元包，但该镜像未带上这两个） |
-| 现状与细则不符 | 细则是 NavFn 时代，现状是 ThetaStar | 问组长确认基线与"不许用"的范围 |
+| **父仓库 pin 的版本过旧且编译不过** | `rmcs-navigation-deps` pin 的是 `d57fa1c`（5 月，ThetaStar，缺依赖声明），上游 `main` 已是 8 月版本 | 已切到 `main`；建议同时反馈"父仓库子模块指针该更新" |
+| 与 `rmcs-navigation-deps` 默认不一致 | 我们的基线是上游 `main`，不是父仓库默认 pin 的 commit | 报备组长；说明 pin 的版本无法构建 |
 | 地图偏粗 | 292×161 px @ 0.1 m，膨胀 0.3 m 只占 3 格 | 窄门洞可能无解；必要时提高分辨率或降膨胀 |
 | 磁盘紧张 | 根分区剩余约 16 GB | 全量 `colcon build`（含 `point-lio`）前留意空间 |
 | 子模块 detached HEAD | 直接提交会丢 | 已建分支 `feat/smac-global-planner` ✅ |
-| 无实车 | 调参最终要实机 | 参数先在线试，落盘前需实机/仿真确认 |
+| 无实车 | 调参最终要实机 | 先用 `static.launch.yaml` 纯软件验证，落盘前需实机确认 |
+| 静态测试的局限 | mock 的 `local_map` 是空图，没有真实障碍与传感器噪声；**验证不了跟随质量** | 静态栈只能验证"规划链路 + 参数加载 + 规划速度"，跟随效果仍需实机 |
