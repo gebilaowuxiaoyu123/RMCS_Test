@@ -21,3 +21,8 @@
 # 2027 算法组考核 · 导航方向：官方导航依赖栈（第三方多仓库，仅本地参考，不入库）
 # 拉取与使用方式见 docs/zh-cn/算法组考核/任务规划.md
 /rmcs_ws/src/rmcs-navigation-deps/
+
+# 2027 算法组考核 · 导航方向：考核文档独立成仓 RMCS_Navigation
+# （过程中提交到该仓，最终版并入本仓的方式见
+#   docs/zh-cn/算法组考核/任务规划.md §8.3「最终版提交回 RMCS_Test」）
+/docs/zh-cn/算法组考核/
