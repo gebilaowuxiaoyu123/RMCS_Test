@@ -12,6 +12,7 @@
 - [导航方向（进行中）](#导航方向进行中)
 - [第二周（已完成）](#第二周已完成)
 - [仓库结构](#仓库结构)
+- [仓库与推送约定](#仓库与推送约定)
 - [环境与快速开始](#环境与快速开始)
 - [相关文档](#相关文档)
 
@@ -148,6 +149,62 @@ navigation_ws/
 └── Hybrid_Astar_for_Navigation/  参考用的开源实现（只作参考，没入库）
 
 rmcs_ws/src/rmcs-navigation-deps/ 导航方向的官方依赖栈（6 个子模块，第三方，不入库）
+```
+
+## 仓库与推送约定
+
+> 这块最容易绕，先记一句：**只有一个容器、一个工作区；"仓库"指的是 git remote，不是文件夹。**
+> 容器：`LIGEON`（`docker-compose.yml` 的服务 `rmcs-develop`） · 工作区：`/workspaces/RMCS`（容器内唯一的项目目录）
+
+### 推送到哪些仓库
+
+本工作区下有 13 个 git 仓库，只有下面这三个是**自己的产出**，`git push` 都指向自己账号：
+
+| 本地路径 | 推送目标 | 说明 |
+|---|---|---|
+| `/workspaces/RMCS`（工作区根） | `RMCS_Test` | 作业主仓；`main` / `main-draft3` / `main-wip-backup` 三个分支的上游都指向它 |
+| `rmcs_motor_demo/` | `rmcs_motor_demo` | 独立练习仓（`RMCS` 主仓通过 `.gitignore` 排除它，不并入） |
+| `rmcs_ws/src/rmcs-navigation-deps/rmcs-navigation/` | `rmcs-navigation`（fork） | 导航方向的规划器改动写在这里 |
+
+### 哪些仓库**不要**推送
+
+以下都是**第三方**，保持原样：
+
+`opencv_ws/opencv`、`navigation_ws/Hybrid_Astar_for_Navigation`、`rmcs_ws/src/fast_tf`、
+`rmcs_ws/src/rmcs_auto_aim_v2`、`rmcs_ws/src/rmcs-navigation-deps` 及其余 5 个子模块。
+
+原因：
+
+1. 它们不是本作业的产出，推上去没有意义；
+2. 账号对官方仓**没有写权限**，硬推只会得到 `Permission denied`（也算一层保险，不会误污染上游）；
+3. 保留指向官方，才能继续 `git fetch` 拉取上游更新。
+
+### `origin` 与 `upstream`
+
+改过配置的仓库统一采用这个约定：
+
+| remote 名 | 指向 | 用途 |
+|---|---|---|
+| `origin` | **你自己的**仓库 | `git push` 默认落到这里 |
+| `upstream` | 官方仓库 | 只用于 `git fetch` 拉更新 |
+
+> ⚠️ 工作区根目录的 `origin` 仍指向官方 `Alliance-Algorithm/RMCS`（方便拉上游更新），这是**刻意保留**的。
+> 三个分支的上游都是 `RMCS_Test`，所以直接 `git push` 就是推到自己的仓库；`git push origin` 会因无权限而报错，属正常现象。
+
+### 速查
+
+```bash
+# 我在哪个容器、哪个目录、哪个仓库、哪个分支
+echo "容器=$(hostname)  目录=$PWD"
+git rev-parse --show-toplevel
+git branch --show-current
+
+# 这个仓库会推去哪
+git remote -v
+git branch -vv
+
+# 网络：GitHub HTTPS 直连不通，需走 SSH
+git config --global url."git@github.com:".insteadOf "https://github.com/"
 ```
 
 ## 环境与快速开始

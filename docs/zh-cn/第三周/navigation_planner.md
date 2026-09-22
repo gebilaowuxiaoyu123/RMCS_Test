@@ -276,16 +276,32 @@ ros2 launch rmcs_bringup rmcs.launch.py robot:=navigation_test
 
 ### 7.3 留痕位置
 
-改动文件在 `rmcs-navigation` **子模块**内，不在作业仓库里，所以：
+改动文件在 `rmcs-navigation` **子模块**内，不在作业仓库里，所以分两处：
 
-- **代码痕迹**：fork `Alliance-Algorithm/rmcs-navigation` → 在自己的 fork 上提交
-  ```bash
-  cd rmcs_ws/src/rmcs-navigation-deps/rmcs-navigation
-  git remote rename origin upstream
-  git remote add origin git@github.com:<你的账号>/rmcs-navigation.git
-  git push -u origin feat/smac-global-planner
-  ```
-- **文档痕迹**：本文档 + `README.md` 的「导航方向」章节（在作业仓库里）
+| 位置 | 内容 | 状态 |
+|---|---|---|
+| fork `gebilaowuxiaoyu123/rmcs-navigation`，分支 `feat/smac-global-planner` | 规划器相关改动（`config/motion.yaml` 等） | ✅ fork 与分支已就绪 |
+| `RMCS_Test`（本作业仓 `main`） | 本文档 + `README.md` 的「导航方向」章节 | ✅ 已推送 |
+
+子模块 remote 已按如下约定配置：
+
+| remote | 指向 | 用途 |
+|---|---|---|
+| `origin` | `gebilaowuxiaoyu123/rmcs-navigation`（自己的 fork） | `git push` 默认去这里 |
+| `upstream` | `Alliance-Algorithm/rmcs-navigation`（官方） | 只用于 `git fetch` 拉更新 |
+
+```bash
+cd rmcs_ws/src/rmcs-navigation-deps/rmcs-navigation
+git checkout feat/smac-global-planner
+
+# 改完 config/motion.yaml 后
+git add config/motion.yaml
+git commit -m "feat(nav): ..."
+git push          # → origin，也就是自己的 fork
+```
+
+> 其余第三方仓库（`opencv`、`Hybrid_Astar_for_Navigation`、`fast_tf`、`rmcs_auto_aim_v2`、
+> `rmcs-navigation-deps` 及其它 5 个子模块）保持指向官方，不推送。详见 `README.md` 的「仓库与推送约定」。
 
 ### 7.4 网络注意
 
@@ -300,16 +316,18 @@ git config --global url."git@github.com:".insteadOf "https://github.com/"
 ## 八、待办清单
 
 - [ ] 向组长确认：基线是 NavFn 还是 ThetaStar
-- [ ] 拉取依赖（已完成 ✅）
+- [x] 拉取依赖（`rmcs-navigation-deps` + 6 个子模块）
+- [x] 确认场地地图可用（`maps/rmuc-v2.png`，292×161 px @ 0.1 m）
+- [x] fork `rmcs-navigation`，推送分支 `feat/smac-global-planner`
+- [x] 本文档推送至 `RMCS_Test`
+- [ ] 补齐运行时依赖：`nav2-mppi-controller`、`py-trees`
 - [ ] 构建通过：`colcon build`
 - [ ] 用**当前规划器**跑通一次 + 录屏（基线）
-- [ ] fork `rmcs-navigation`，把 `feat/smac-global-planner` 分支推上去
 - [ ] 切换 `SmacPlanner2D`，编译、跑通、录屏（对比素材）
 - [ ] 按 6.2 的顺序调参，逐条记录现象
 - [ ] 确认 `/plan` 频率稳定（"无卡顿"的客观证据）
 - [ ] 跨场验证：门洞可通行、起伏路段能规划到对面
 - [ ] 本文档补上真实数据 + 对比截图
-- [ ] 提交代码 + 文档，更新 `README.md`
 - [ ] 准备三句话：**为什么选它 / 和现有规划器差在哪 / 调参怎么想的**
 
 ---
@@ -318,6 +336,7 @@ git config --global url."git@github.com:".insteadOf "https://github.com/"
 
 | 风险 | 说明 | 应对 |
 |---|---|---|
+| **运行时依赖缺口** | 镜像里缺 `ros-jazzy-nav2-mppi-controller` 和 `ros-jazzy-py-trees`；**前者是当前配置的局部规划器**，缺了 `controller_server` 起不来 | 容器内可免密 `sudo apt-get install` 补齐（Dockerfile 装的是 nav2 元包，但该镜像未带上这两个） |
 | 现状与细则不符 | 细则是 NavFn 时代，现状是 ThetaStar | 问组长确认基线与"不许用"的范围 |
 | 地图偏粗 | 292×161 px @ 0.1 m，膨胀 0.3 m 只占 3 格 | 窄门洞可能无解；必要时提高分辨率或降膨胀 |
 | 磁盘紧张 | 根分区剩余约 16 GB | 全量 `colcon build`（含 `point-lio`）前留意空间 |
