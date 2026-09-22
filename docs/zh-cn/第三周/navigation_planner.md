@@ -106,20 +106,47 @@ commit 3663d5f  wip: localization api, refactor impl and adjust nav2 config
 
 ### 3.2 地图**已有**，不需要等扫描件 ✅
 
-`rmcs-navigation/maps/` 目录（以 `main` 为准）：
+⚠️ **先分清"地图"这个词的两层含义**，否则很容易混淆：
 
-| 文件 | 像素 | 分辨率 | 实际覆盖 |
+| 种类 | 位置 | 形式 | 给谁用 |
 |---|---|---|---|
-| **`rmuc-v2.png`** + `rmuc.yaml` | 292 × 161 | 0.1 m/px | **29.2 m × 16.1 m**（RMUC 场地，**默认使用这张**） |
-| `rmuc-v3.png` | 292 × 161 | — | 同尺寸的另一个版本，暂无 yaml 引用 |
-| `rmul.png` + `rmul.yaml` | 240 × 160 | 0.05 m/px | 12.0 m × 8.0 m（RMUL 场地） |
-| `战队.png` + `战队.yaml` | 343 × 110 | 0.1 m/px | 34.3 m × 11.0 m（另一张场地） |
-| `empty.png` + `empty.yaml` | 2000 × 2000 | 0.05 m/px | 100 m × 100 m 空图，做对照/局部 mock |
+| **① Nav2 栅格地图** | `maps/*.png` + `*.yaml` | 像素图（黑=障碍/白=可走） | **代价地图 / 规划器**（本次任务相关） |
+| **② Lua 路径点模型** | `src/lua/map/*.lua` | "节点 + 边 + 边上任务"的抽象图 | **Lua 决策层**（去哪、怎么跨地形） |
 
-已验证 `rmuc-v2.png` 内容是**真实场地结构**（中央环形障碍、两侧立柱、对称通道），非占位图。
+> `src/lua/map/train.lua`、`train.lua` 属于**第 ② 类**，是**代码**不是图片，与规划器调参无关。
 
-`static.launch.yaml` 的 `global_map` 参数默认 `rmuc`，而 `rmuc.yaml` 里 `image: rmuc-v2.png`，
-所以**实际生效的是 `rmuc-v2.png`**：
+#### ① Nav2 栅格地图清单（`maps/`）
+
+| 文件 | 像素 | 分辨率 | 覆盖范围 | 引用情况 |
+|---|---|---|---|---|
+| **`rmuc-v2.png`** ← `rmuc.yaml` | 292×161 | 0.1 m/px | **29.2 m × 16.1 m** | ✅ **默认使用** |
+| `rmuc-v3.png` | 292×161 | — | 同尺寸 | ⚠️ **孤儿**（无 yaml 引用） |
+| `rmuc.png` | 292×161 | — | 同尺寸 | ⚠️ **孤儿**（无 yaml 引用，最老的版本） |
+| `rmul.png` ← `rmul.yaml` | 240×160 | 0.05 m/px | 12.0 m × 8.0 m | RMUL 场地 |
+| `战队.png` ← `战队.yaml` | 343×110 | 0.1 m/px | 34.3 m × 11.0 m | 实际场地扫描风格（**带噪点**） |
+| `empty.png` ← `empty.yaml` | 2000×2000 | 0.05 m/px | 100 m × 100 m | 空图，**局部地图 mock 用** |
+
+#### 三张 rmuc 的关系（逐像素比对过）
+
+| 对比 | 不同像素 | 结论 |
+|---|---|---|
+| `rmuc.png` vs `rmuc-v2.png` | 3.08% | `rmuc.png` **缺少中部四个六边形障碍**，是最老版本 |
+| `rmuc.png` vs `rmuc-v3.png` | 3.88% | 同上 |
+| `rmuc-v2.png` vs `rmuc-v3.png` | **0.80%** | **v3 是 v2 的微调版**（结构相同，仅局部像素差异） |
+
+→ 所以 **v2 和 v3 实质是同一张图的两次修订**，`rmuc.png` 是结构不同的远古版本。
+
+#### 地图是怎么被选中的
+
+启动文件的 `global_map` 参数 → 拼成 `maps/<名字>.yaml` → yaml 里的 `image:` 字段决定用哪张 png：
+
+| 启动文件 | `global_map` 默认值 | 实际加载 |
+|---|---|---|
+| `static.launch.yaml` | `rmuc` | `rmuc.yaml` → **`rmuc-v2.png`** |
+| `sensor.launch.yaml` | `empty` | `empty.yaml`（真机时靠局部地图感知障碍） |
+| `recall.launch.yaml` | `empty` | `empty.yaml` |
+
+`rmuc.yaml` 内容：
 
 ```yaml
 image: rmuc-v2.png
@@ -131,8 +158,25 @@ occupied_thresh: 0.650000
 free_thresh: 0.196000
 ```
 
-→ 组长后续给实际场地扫描件时，**只需替换 png + 改 `resolution` / `origin`**，配置代码不用动。
-也可以直接加一组新的 `xxx.yaml`，启动时用 `global_map:=xxx` 切换。
+#### 用法
+
+```bash
+# 换地图：用启动参数覆盖，不用改文件
+ros2 launch rmcs-navigation static.launch.yaml global_map:=战队
+```
+
+→ 组长后续给实际场地扫描件时，**只需替换 png + 改 `resolution` / `origin`**，代码不用动。
+`战队.png` 看起来就是**实扫风格**（不规则 + 噪点），可作为"真实地图"的参照。
+
+#### ② Lua 路径点模型（`src/lua/map/`）
+
+| 文件 | 作用 |
+|---|---|
+| `core.lua` | 通用抽象：注册节点（`Map:point`）、连边（`Map:connect`）、搜索路径（`Map:search`） |
+| `rmuc.lua` | RMUC 场地的路径点与跨地形任务（`endpoint/rmuc.lua` 用） |
+| `train.lua` | **训练场地**的路径点（`endpoint/train.lua`、`free.lua` 用），含 `blocking_cross_step` 跨台阶 |
+
+> 这两个"地图"的关系：Lua 层决定"去哪个点"，到具体两点之间的移动则交给 Nav2 的栅格地图规划。
 
 ### 3.3 容器里可用的全局规划器 ✅
 
