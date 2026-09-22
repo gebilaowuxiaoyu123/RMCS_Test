@@ -9,10 +9,8 @@
 - [第三周](#第三周)
   - [任务一览](#任务一览)
   - [怎么跑](#怎么跑)
-- [导航方向（进行中）](#导航方向进行中)
 - [第二周（已完成）](#第二周已完成)
 - [仓库结构](#仓库结构)
-- [仓库与推送约定](#仓库与推送约定)
 - [环境与快速开始](#环境与快速开始)
 - [相关文档](#相关文档)
 
@@ -22,7 +20,6 @@
 |---|---|---|
 | 第二周 | 电机驱动：任务二·速度闭环、任务三·双环控角度（真机验证通过） | ✅ 完成 |
 | 第三周 | 任务一 PID 参数分析 / 任务二 底盘运动学 + 龙门架 / 任务三 OpenCV 轮廓检测 / 任务四 A\* 寻路 | ✅ 完成 |
-| 考核·导航方向 | 全局规划器选型与调参：切换 Nav2 全局规划器、调参消除卡顿、跨场导航 | 🚧 进行中 |
 
 ## 第三周
 
@@ -63,38 +60,6 @@ source install/setup.bash
 ros2 launch rmcs_bringup rmcs.launch.py robot:=gantry
 ```
 
-## 导航方向（进行中）
-
-> 对应《2027赛季算法组培训考核作业细则》**§3 导航方向**。
-> 完整分析、选型理由、调参思路见 [navigation_planner.md](docs/zh-cn/第三周/navigation_planner.md)。
-
-**目标**：用 `rmcs-navigation-deps` 控制哨兵，换掉现有的全局规划器（细则原文：不能用 NavfnPlanner），在真实场地做到**跨场导航**且过程**无明显卡顿**。
-
-| 项 | 内容 | 状态 |
-|---|---|---|
-| 依赖栈 | `rmcs-navigation-deps`（rmcs-navigation / local-map / localization / point-lio / 雷达驱动） | ✅ 已拉取 |
-| 场地地图 | `rmcs-navigation/maps/rmuc-v2.png`，292×161 px @ 0.1 m ≈ 29.2 m × 16.1 m（RMUC 场地） | ✅ 已就位 |
-| 基线跑通 | 用**现有**规划器跑一次并录屏存档，作为对比基线 | ⏳ 待做 |
-| 规划器切换 | 候选 `SmacPlanner2D`（多分辨率降采样 + 代价感知 + 内置平滑） | ⏳ 待做 |
-| 调参 | 消除卡顿：`/plan` 频率稳定、重规划时 `/cmd_vel` 无突变 | ⏳ 待做 |
-
-**怎么跑**
-
-```bash
-# 依赖（首次，需走 SSH）
-cd rmcs_ws/src
-git clone --recurse-submodules https://github.com/Alliance-Algorithm/rmcs-navigation-deps.git
-
-cd /workspaces/RMCS/rmcs_ws
-colcon build
-source install/setup.bash
-ros2 launch rmcs_bringup rmcs.launch.py robot:=navigation_test
-```
-
-观测：`ros2 run foxglove_bridge foxglove_bridge --ros-args -p port:=8765`，浏览器连 `ws://localhost:8765` 看 `/plan`、`/global_costmap`。
-
-> 本机 GitHub HTTPS 直连超时，需走 SSH：`git config --global url."git@github.com:".insteadOf "https://github.com/"`
-
 ## 第二周（已完成）
 
 电机驱动的两个任务，都在真机上验证过：
@@ -127,8 +92,7 @@ docs/zh-cn/
 ├── 第二周/                       任务一分析 + 任务二/三教程（含 assets / mermaid）
 │   └── firing_mechanism_chain.md
 └── 第三周/
-    ├── pid_tuning_reference.md   任务一（PID 三场景）+ 任务二（底盘运动学 + 龙门架）
-    └── navigation_planner.md     导航方向：全局规划器选型 + 调参思路（进行中）
+    └── pid_tuning_reference.md   任务一（PID 三场景）+ 任务二（底盘运动学 + 龙门架）
 
 rmcs_ws/src/rmcs_core/            第三周任务二新增的源码（官方库只动了 plugins.xml 登记）
 ├── src/hardware/gantry.cpp               龙门架硬件层：CAN 收发、两个电机
@@ -147,64 +111,6 @@ navigation_ws/
 ├── task4.md                      第三周任务四文档
 ├── task4/                        任务四代码 + 结果图
 └── Hybrid_Astar_for_Navigation/  参考用的开源实现（只作参考，没入库）
-
-rmcs_ws/src/rmcs-navigation-deps/ 导航方向的官方依赖栈（6 个子模块，第三方，不入库）
-```
-
-## 仓库与推送约定
-
-> 这块最容易绕，先记一句：**只有一个容器、一个工作区；"仓库"指的是 git remote，不是文件夹。**
-> 容器：`LIGEON`（`docker-compose.yml` 的服务 `rmcs-develop`） · 工作区：`/workspaces/RMCS`（容器内唯一的项目目录）
-
-### 推送到哪些仓库
-
-本工作区下有 13 个 git 仓库，只有下面这三个是**自己的产出**，`git push` 都指向自己账号：
-
-| 本地路径 | 推送目标 | 说明 |
-|---|---|---|
-| `/workspaces/RMCS`（工作区根） | `RMCS_Test` | 作业主仓；`main` / `main-draft3` / `main-wip-backup` 三个分支的上游都指向它 |
-| `rmcs_motor_demo/` | `rmcs_motor_demo` | 独立练习仓（`RMCS` 主仓通过 `.gitignore` 排除它，不并入） |
-| `rmcs_ws/src/rmcs-navigation-deps/rmcs-navigation/` | `rmcs-navigation`（fork） | 导航方向的规划器改动写在这里 |
-
-### 哪些仓库**不要**推送
-
-以下都是**第三方**，保持原样：
-
-`opencv_ws/opencv`、`navigation_ws/Hybrid_Astar_for_Navigation`、`rmcs_ws/src/fast_tf`、
-`rmcs_ws/src/rmcs_auto_aim_v2`、`rmcs_ws/src/rmcs-navigation-deps` 及其余 5 个子模块。
-
-原因：
-
-1. 它们不是本作业的产出，推上去没有意义；
-2. 账号对官方仓**没有写权限**，硬推只会得到 `Permission denied`（也算一层保险，不会误污染上游）；
-3. 保留指向官方，才能继续 `git fetch` 拉取上游更新。
-
-### `origin` 与 `upstream`
-
-改过配置的仓库统一采用这个约定：
-
-| remote 名 | 指向 | 用途 |
-|---|---|---|
-| `origin` | **你自己的**仓库 | `git push` 默认落到这里 |
-| `upstream` | 官方仓库 | 只用于 `git fetch` 拉更新 |
-
-> ⚠️ 工作区根目录的 `origin` 仍指向官方 `Alliance-Algorithm/RMCS`（方便拉上游更新），这是**刻意保留**的。
-> 三个分支的上游都是 `RMCS_Test`，所以直接 `git push` 就是推到自己的仓库；`git push origin` 会因无权限而报错，属正常现象。
-
-### 速查
-
-```bash
-# 我在哪个容器、哪个目录、哪个仓库、哪个分支
-echo "容器=$(hostname)  目录=$PWD"
-git rev-parse --show-toplevel
-git branch --show-current
-
-# 这个仓库会推去哪
-git remote -v
-git branch -vv
-
-# 网络：GitHub HTTPS 直连不通，需走 SSH
-git config --global url."git@github.com:".insteadOf "https://github.com/"
 ```
 
 ## 环境与快速开始
@@ -239,7 +145,6 @@ git config --global url."git@github.com:".insteadOf "https://github.com/"
 - 第三周任务一 + 任务二：[docs/zh-cn/第三周/pid_tuning_reference.md](docs/zh-cn/第三周/pid_tuning_reference.md)
 - 第三周任务三：[opencv_ws/task3.md](opencv_ws/task3.md)
 - 第三周任务四：[navigation_ws/task4.md](navigation_ws/task4.md)
-- 导航方向（全局规划器选型 + 调参）：[docs/zh-cn/第三周/navigation_planner.md](docs/zh-cn/第三周/navigation_planner.md)
 - 第二周任务一/二/三：[docs/zh-cn/第二周/firing_mechanism_chain.md](docs/zh-cn/第二周/firing_mechanism_chain.md)
 - 官方原有的中文文档（环境搭建、镜像、交叉编译等）：[docs/zh-cn/原/](docs/zh-cn/原/)
 - 上游 Wiki：[Alliance-Algorithm/RMCS Wiki](https://github.com/Alliance-Algorithm/RMCS/wiki/Quick-Start)
